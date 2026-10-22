@@ -1,469 +1,2983 @@
-# REFERÊNCIA HISTÓRICA: este contrato foi elaborado para a arquitetura original Laravel/MySQL.
-# Ele não descreve exatamente a API da implementação local Python + SQLite.
-# Para as rotas atuais, consulte docs/api/api-local.md.
 openapi: 3.0.3
 info:
-  title: API — Achados e Perdidos
+  title: Encontrei — API local
   version: 1.0.0
-  description: API REST do MVP acadêmico para anúncios, reivindicações, denúncias, notificações e administração de achados e perdidos no campus.
+  description: Contrato OpenAPI da edição acadêmica Python + SQLite executada localmente em http://127.0.0.1:8000.
+    A API não deve ser exposta diretamente à internet. Rotas, campos e regras completos também estão em docs/api/api-local.md.
 servers:
-  - url: http://localhost:8000/api
-    description: Ambiente local
-security:
-  - bearerAuth: []
+- url: http://127.0.0.1:8000
+  description: Servidor local de demonstração
 components:
   securitySchemes:
-    bearerAuth:
+    BearerToken:
       type: http
       scheme: bearer
-      bearerFormat: Sanctum token
+      bearerFormat: opaque token retornado por /api/login
   schemas:
-    Message:
+    Error:
       type: object
+      required:
+      - error
       properties:
-        message: { type: string, example: Solicitação processada com sucesso. }
-    ValidationError:
-      type: object
-      properties:
-        message: { type: string }
-        errors:
-          type: object
-          additionalProperties:
-            type: array
-            items: { type: string }
-    Item:
-      type: object
-      properties:
-        id: { type: string, format: uuid }
-        tipo: { type: string, enum: [ACHADO, PERDIDO] }
-        titulo: { type: string, maxLength: 140 }
-        descricao: { type: string }
-        data_ocorrencia: { type: string, format: date }
-        status: { type: string, enum: [ABERTO, PONTO_GUARDA, RESOLVIDO, EXPIRADO, OCULTO] }
-        categoria: { type: object }
-        local: { type: object }
-        fotos: { type: array, maxItems: 3, items: { type: object } }
-        pergunta_verificacao:
+        error:
           type: string
-          description: Nunca é retornada pela API pública.
-    ErrorResponse:
+    Success:
       type: object
       properties:
-        message: { type: string }
+        message:
+          type: string
+    LoginRequest:
+      type: object
+      required:
+      - email
+      - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    ItemCreateRequest:
+      type: object
+      required:
+      - title
+      - type
+      - category
+      - description
+      - location
+      - event_date
+      properties:
+        title:
+          type: string
+          minLength: 3
+          maxLength: 100
+        type:
+          type: string
+          enum:
+          - Achado
+          - Perdido
+        category:
+          type: string
+        description:
+          type: string
+        location:
+          type: string
+        event_date:
+          type: string
+          format: date
+        photos:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            required:
+            - mime
+            - data
+            properties:
+              mime:
+                type: string
+                enum:
+                - image/jpeg
+                - image/png
+                - image/webp
+              data:
+                type: string
+                description: Data URL de imagem em Base64
+        verification_question:
+          type: string
+        verification_answer:
+          type: string
 paths:
-  /auth/register:
+  /api/health:
+    get:
+      summary: Verificar saúde e banco
+      description: Retorna o estado da aplicação, tipo de banco e quantidade de anúncios.
+      operationId: get_api_health
+      tags:
+      - health
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/config:
+    get:
+      summary: Listar catálogos ativos
+      description: Categorias e locais ativos para formulários.
+      operationId: get_api_config
+      tags:
+      - config
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/register:
     post:
-      security: []
-      summary: Criar conta institucional pendente de verificação
+      summary: Cadastrar conta
+      description: 'Cria uma conta pendente de verificação. Body: name, email, password, password_confirmation.
+        No modo local devolve verification_url.'
+      operationId: post_api_register
+      tags:
+      - register
+      responses:
+        '201':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [nome, email, senha, senha_confirmation]
-              properties:
-                nome: { type: string, minLength: 2, maxLength: 120 }
-                email: { type: string, format: email }
-                senha: { type: string, minLength: 8, format: password }
-                senha_confirmation: { type: string, format: password }
-      responses:
-        '201': { description: Conta criada; no ambiente local, o token de teste é retornado na resposta. }
-        '422': { description: E-mail/domínio ou campos inválidos, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationError' } } } }
-  /auth/login:
-    post:
-      security: []
-      summary: Autenticar uma conta ativa
-      description: Limitado a cinco tentativas por minuto por e-mail e IP.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [email, senha]
-              properties:
-                email: { type: string, format: email }
-                senha: { type: string, format: password }
-      responses:
-        '200': { description: Token Bearer e perfil público do usuário. }
-        '403': { description: Conta pendente, suspensa ou inativa. }
-        '422': { description: Credenciais inválidas. }
-  /auth/verify-email:
-    post:
-      security: []
-      summary: Verificar e-mail e ativar conta
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object, required: [token], properties: { token: { type: string } } }
-      responses:
-        '200': { description: Conta ativa e token Bearer. }
-        '422': { description: Token inválido ou expirado. }
-  /auth/resend-verification:
-    post:
-      security: []
-      summary: Reenviar link de verificação
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object, required: [email], properties: { email: { type: string, format: email } } }
-      responses:
-        '200': { description: Mensagem neutra para não revelar se a conta existe. }
-  /auth/me:
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/verify-email:
     get:
-      summary: Consultar usuário autenticado
+      summary: Verificar e-mail
+      description: Abre link com token de uso único que expira em 24 horas.
+      operationId: get_api_verify_email
+      tags:
+      - verify-email
       responses:
-        '200': { description: Perfil do usuário. }
-        '401': { description: Token ausente ou inválido. }
-  /auth/logout:
-    post:
-      summary: Revogar token de acesso atual
-      responses: { '200': { description: Sessão encerrada. } }
-  /auth/preferences:
-    patch:
-      summary: Atualizar preferência de e-mail
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object, required: [emails_ativados], properties: { emails_ativados: { type: boolean } } }
-      responses: { '200': { description: Preferência salva. } }
-  /categories:
-    get:
-      security: []
-      summary: Listar categorias ativas
-      responses: { '200': { description: Lista de categorias. } }
-  /locations:
-    get:
-      security: []
-      summary: Listar locais ativos do campus
-      responses: { '200': { description: Lista de locais. } }
-  /guard-points:
-    get:
-      security: []
-      summary: Listar pontos de guarda ativos
-      responses: { '200': { description: Lista de pontos de guarda. } }
-  /items:
-    get:
-      security: []
-      summary: Buscar e filtrar anúncios públicos
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       parameters:
-        - { in: query, name: q, schema: { type: string }, description: Busca por título e descrição. }
-        - { in: query, name: tipo, schema: { type: string, enum: [ACHADO, PERDIDO] } }
-        - { in: query, name: categoria_id, schema: { type: string, format: uuid } }
-        - { in: query, name: local_id, schema: { type: string, format: uuid } }
-        - { in: query, name: data_inicio, schema: { type: string, format: date } }
-        - { in: query, name: data_fim, schema: { type: string, format: date } }
-        - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
-      responses: { '200': { description: Página de anúncios ativos. } }
-    post:
-      summary: Publicar item achado ou perdido (multipart/form-data)
-      requestBody:
+      - name: token
+        in: query
         required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [tipo, titulo, descricao, categoria_id, local_id, data_ocorrencia]
-              properties:
-                tipo: { type: string, enum: [ACHADO, PERDIDO] }
-                titulo: { type: string, minLength: 3, maxLength: 140 }
-                descricao: { type: string, minLength: 5, maxLength: 5000 }
-                categoria_id: { type: string, format: uuid }
-                local_id: { type: string, format: uuid }
-                data_ocorrencia: { type: string, format: date }
-                pergunta_verificacao: { type: string, description: Obrigatória para ACHADO. }
-                resposta_verificacao: { type: string, description: Obrigatória para ACHADO; armazenada criptografada. }
-                ponto_guarda_id: { type: string, format: uuid, description: Apenas moderadores/administradores. }
-                fotos[]: { type: array, maxItems: 3, items: { type: string, format: binary } }
+        description: Token de verificação
+        schema:
+          type: string
+  /api/resend-verification:
+    post:
+      summary: Reenviar link local de verificação
+      description: 'Body: email. No modo local devolve URL; não envia SMTP.'
+      operationId: post_api_resend_verification
+      tags:
+      - resend-verification
       responses:
-        '201': { description: Anúncio criado; até cinco correspondências podem acompanhar a resposta para um item perdido. }
-        '422': { description: Validação ou regra de negócio violada. }
-  /items/{id}:
-    get:
-      security: []
-      summary: Consultar detalhes públicos do item
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
-      responses: { '200': { description: Detalhes sem pergunta/resposta de verificação. }, '404': { description: Anúncio indisponível. } }
-    patch:
-      summary: Editar título, descrição e fotos do anúncio próprio
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       requestBody:
+        required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
               type: object
-              properties:
-                titulo: { type: string, maxLength: 140 }
-                descricao: { type: string, maxLength: 5000 }
-                fotos[]: { type: array, maxItems: 3, items: { type: string, format: binary } }
-      responses: { '200': { description: Anúncio atualizado. }, '403': { description: Não é o publicador. }, '422': { description: Anúncio não está aberto ou dados inválidos. } }
-  /items/{id}/verification-question:
-    get:
-      summary: Obter a pergunta de verificação privada antes da reivindicação
-      description: Exige autenticação; nunca retorna a resposta esperada. Bloqueia o publicador, itens fechados e itens com reivindicação aprovada.
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/login:
+    post:
+      summary: Autenticar usuário
+      description: 'Body: email e password; devolve token Bearer e dados públicos da conta.'
+      operationId: post_api_login
+      tags:
+      - login
       responses:
-        '200': { description: Pergunta que o usuário deve responder para reivindicar o item. }
-        '401': { description: Autenticação necessária. }
-        '422': { description: O item não aceita reivindicações ou pertence ao solicitante. }
-  /items/{id}/claims:
-    post:
-      summary: Criar reivindicação para item achado
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object, required: [resposta_verificacao], properties: { resposta_verificacao: { type: string, maxLength: 2000 } } }
-      responses: { '201': { description: Reivindicação pendente. }, '422': { description: Item próprio, fechado ou reivindicação ativa duplicada. } }
-  /claims/{id}/decision:
-    patch:
-      summary: Aprovar ou recusar reivindicação
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [decisao]
-              properties:
-                decisao: { type: string, enum: [APROVAR, RECUSAR] }
-                motivo_recusa: { type: string, maxLength: 1000 }
-      responses: { '200': { description: Decisão registrada. }, '403': { description: Perfil sem permissão. } }
-  /claims/{id}/messages:
-    get:
-      summary: Consultar chat de reivindicação aprovada
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
-      responses: { '200': { description: Mensagens sem contatos pessoais. }, '422': { description: Chat ainda não liberado. } }
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/logout:
     post:
-      summary: Enviar mensagem curta no chat interno
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+      summary: Encerrar sessão
+      description: Invalida token atual.
+      operationId: post_api_logout
+      tags:
+      - logout
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, required: [conteudo], properties: { conteudo: { type: string, maxLength: 500 } } }
-      responses: { '201': { description: Mensagem enviada. } }
-  /claims/{id}/returned:
-    post:
-      summary: Marcar a devolução como concluída
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
-      responses: { '200': { description: Item resolvido e removido da busca pública. } }
-  /my-items:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/me:
     get:
-      summary: Consultar anúncios e reivindicações do usuário autenticado
-      responses: { '200': { description: Lista de anúncios próprios e reivindicações relacionadas. } }
-  /items/{id}/reports:
+      summary: Consultar sessão
+      description: Retorna conta autenticada.
+      operationId: get_api_me
+      tags:
+      - me
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/me/preferences:
+    patch:
+      summary: Alterar preferências
+      description: 'Body: email_notifications boolean. A preferência é guardada, mas SMTP não é enviado por padrão.'
+      operationId: patch_api_me_preferences
+      tags:
+      - me
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/items/categories:
+    get:
+      summary: Listar categorias ativas
+      description: Listar categorias ativas
+      operationId: get_api_items_categories
+      tags:
+      - items
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/items/locations:
+    get:
+      summary: Listar locais ativos
+      description: Listar locais ativos
+      operationId: get_api_items_locations
+      tags:
+      - items
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/guard-points:
+    get:
+      summary: Listar pontos de guarda ativos
+      description: Exige sessão.
+      operationId: get_api_guard_points
+      tags:
+      - guard-points
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/items:
+    get:
+      summary: Buscar anúncios
+      description: Filtros combináveis e paginação; busca pública mostra anúncios ativos.
+      operationId: get_api_items
+      tags:
+      - items
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: q
+        in: query
+        required: false
+        description: Texto livre
+        schema:
+          type: string
+      - name: type
+        in: query
+        required: false
+        description: Achado ou Perdido
+        schema:
+          type: string
+      - name: category
+        in: query
+        required: false
+        description: Nome da categoria
+        schema:
+          type: string
+      - name: location
+        in: query
+        required: false
+        description: Parte do nome do local
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        description: Aberto, Todos, Resolvido, Expirado, Oculto ou No ponto de guarda
+        schema:
+          type: string
+      - name: date_from
+        in: query
+        required: false
+        description: Data inicial AAAA-MM-DD
+        schema:
+          type: string
+      - name: date_to
+        in: query
+        required: false
+        description: Data final AAAA-MM-DD
+        schema:
+          type: string
+      - name: page
+        in: query
+        required: false
+        description: Página
+        schema:
+          type: integer
+      - name: per_page
+        in: query
+        required: false
+        description: Itens por página (1 a 100)
+        schema:
+          type: integer
+    post:
+      summary: Publicar anúncio
+      description: 'Body: title, type, category, description, location, event_date, photos e, para achado, verification_question
+        e verification_answer.'
+      operationId: post_api_items
+      tags:
+      - items
+      responses:
+        '201':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/items/{id}:
+    get:
+      summary: Consultar anúncio
+      description: Detalhes públicos; item oculto só aparece ao publicador ou moderação.
+      operationId: get_api_items_id
+      tags:
+      - items
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    patch:
+      summary: Editar anúncio
+      description: Dono; body pode incluir title, description, category, location, event_date e photos. Só anúncios
+        abertos.
+      operationId: patch_api_items_id
+      tags:
+      - items
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    delete:
+      summary: Excluir anúncio
+      description: Dono ou administrador; bloqueado se há histórico de reivindicação ou denúncia.
+      operationId: delete_api_items_id
+      tags:
+      - items
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/items/{id}/resolve:
+    post:
+      summary: Resolver anúncio
+      description: Dono ou moderação; body vazio.
+      operationId: post_api_items_id_resolve
+      tags:
+      - items
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/items/{id}/verification-question:
+    get:
+      summary: Obter pergunta de verificação
+      description: Retorna só a pergunta; não retorna resposta esperada.
+      operationId: get_api_items_id_verification_question
+      tags:
+      - items
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/items/{id}/claims:
+    get:
+      summary: Listar reivindicações
+      description: Somente publicador ou moderação.
+      operationId: get_api_items_id_claims
+      tags:
+      - items
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    post:
+      summary: Reivindicar item
+      description: 'Body: answer. Bloqueia autorrivindicação, reivindicação ativa duplicada e nova reivindicação quando o item já possui uma reivindicação aprovada. Regras também são garantidas por restrição única parcial no SQLite.'
+      operationId: post_api_items_id_claims
+      tags:
+      - items
+      responses:
+        '201':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/items/{id}/matches:
+    get:
+      summary: Consultar correspondências
+      description: Publicador ou moderação; até cinco sugestões por categoria, localização/bloco e janela temporal direcional de até 15 dias após a data da perda.
+      operationId: get_api_items_id_matches
+      tags:
+      - items
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/items/{id}/history:
+    get:
+      summary: Consultar histórico do anúncio
+      description: Publicador ou moderação.
+      operationId: get_api_items_id_history
+      tags:
+      - items
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/items/{id}/reports:
     post:
       summary: Denunciar anúncio
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+      description: 'Body: reason; não permite denunciar próprio anúncio ou duplicar denúncia.'
+      operationId: post_api_items_id_reports
+      tags:
+      - items
+      responses:
+        '201':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, required: [motivo], properties: { motivo: { type: string, minLength: 5, maxLength: 2000 } } }
-      responses: { '201': { description: Denúncia criada. }, '409': { description: Denúncia duplicada para o mesmo usuário e item. } }
-  /notifications:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/guard-points/items:
+    post:
+      summary: Registrar item no ponto de guarda
+      description: Moderador/administrador; body inclui guard_point_id e dados de anúncio.
+      operationId: post_api_guard_points_items
+      tags:
+      - guard-points
+      responses:
+        '201':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/my/items:
     get:
-      summary: Consultar notificações e quantidade não lida
-      responses: { '200': { description: Notificações recentes do usuário. } }
-  /notifications/{id}/read:
+      summary: Listar meus anúncios
+      description: Exige sessão.
+      operationId: get_api_my_items
+      tags:
+      - my
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/my/claims:
+    get:
+      summary: Listar minhas reivindicações
+      description: Exige sessão.
+      operationId: get_api_my_claims
+      tags:
+      - my
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/my/history:
+    get:
+      summary: Listar meu histórico
+      description: Exige sessão.
+      operationId: get_api_my_history
+      tags:
+      - my
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/claims/{id}/decision:
+    post:
+      summary: Aprovar ou recusar reivindicação
+      description: 'Body: decision Aprovada/Recusada e note; regras de papel dependem do item.'
+      operationId: post_api_claims_id_decision
+      tags:
+      - claims
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/claims/{id}/returned:
+    post:
+      summary: Confirmar devolução
+      description: Somente reivindicação aprovada; ponto de guarda exige moderação.
+      operationId: post_api_claims_id_returned
+      tags:
+      - claims
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/claims/{id}/messages:
+    get:
+      summary: Listar mensagens da conversa
+      description: Somente participantes, após aprovação.
+      operationId: get_api_claims_id_messages
+      tags:
+      - claims
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    post:
+      summary: Enviar mensagem
+      description: 'Body: body (1 a 500 caracteres); somente participantes da reivindicação aprovada.'
+      operationId: post_api_claims_id_messages
+      tags:
+      - claims
+      responses:
+        '201':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/notifications:
+    get:
+      summary: Listar notificações
+      description: Notificações privadas do usuário autenticado.
+      operationId: get_api_notifications
+      tags:
+      - notifications
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/notifications/unread-count:
+    get:
+      summary: Contar não lidas
+      description: Exige sessão.
+      operationId: get_api_notifications_unread_count
+      tags:
+      - notifications
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/notifications/{id}/read:
     patch:
       summary: Marcar notificação como lida
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
-      responses: { '200': { description: Notificação marcada. } }
-  /notifications/read-all:
-    post:
-      summary: Marcar todas as notificações como lidas
-      responses: { '200': { description: Notificações marcadas. } }
-  /moderation/reports:
-    get:
-      summary: Listar denúncias para moderação
-      responses: { '200': { description: Apenas moderador/administrador. }, '403': { description: Perfil comum. } }
-  /moderation/claims:
-    get:
-      summary: Listar reivindicações encaminhadas para análise de moderação
-      description: Exige perfil moderador/administrador. Inclui reivindicações pendentes encaminhadas por falta de resposta, reivindicações de itens guardados e devoluções desses itens que ainda precisam ser concluídas.
+      description: Só altera notificação da conta autenticada.
+      operationId: patch_api_notifications_id_read
+      tags:
+      - notifications
       responses:
-        '200': { description: Lista paginada de reivindicações encaminhadas e reivindicações aprovadas de itens guardados que aguardam confirmação de devolução. }
-        '403': { description: Perfil sem permissão. }
-  /moderation/reports/{id}:
-    patch:
-      summary: Resolver denúncia e registrar justificativa
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/notifications/read-all:
+    post:
+      summary: Marcar todas como lidas
+      description: Só atua sobre as notificações da conta autenticada.
+      operationId: post_api_notifications_read_all
+      tags:
+      - notifications
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, required: [acao, justificativa], properties: { acao: { type: string, enum: [REMOVER_ANUNCIO, MANTER_ANUNCIO] }, justificativa: { type: string, minLength: 5 } } }
-      responses: { '200': { description: Ação de moderação registrada. } }
-  /moderation/log:
-    get:
-      summary: Consultar histórico de ações de moderação
-      responses: { '200': { description: Histórico paginado. } }
-  /moderation/guard-items:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/users/{id}/reports:
     post:
-      summary: Cadastrar objeto recebido fisicamente no ponto de guarda
-      description: Exige perfil moderador/administrador, tipo ACHADO e ponto de guarda ativo associado ao local informado.
+      summary: Denunciar perfil
+      description: 'Body: reason; impede autodenúncia e duplicidade.'
+      operationId: post_api_users_id_reports
+      tags:
+      - users
+      responses:
+        '201':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
               type: object
-              required: [tipo, titulo, descricao, categoria_id, local_id, data_ocorrencia, ponto_guarda_id]
-              properties:
-                tipo: { type: string, enum: [ACHADO] }
-                titulo: { type: string, minLength: 3, maxLength: 140 }
-                descricao: { type: string, minLength: 5, maxLength: 5000 }
-                categoria_id: { type: string, format: uuid }
-                local_id: { type: string, format: uuid }
-                data_ocorrencia: { type: string, format: date }
-                pergunta_verificacao: { type: string, minLength: 8, maxLength: 255 }
-                resposta_verificacao: { type: string, maxLength: 1000 }
-                ponto_guarda_id: { type: string, format: uuid }
-                fotos[]: { type: array, minItems: 1, maxItems: 3, items: { type: string, format: binary } }
-      responses: { '201': { description: Item cadastrado no ponto de guarda. }, '403': { description: Perfil sem permissão. }, '422': { description: Dados inválidos ou ponto/local incompatíveis. } }
-  /admin/categories:
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/moderation/reports:
     get:
-      summary: Listar todas as categorias, incluindo inativas
-      responses: { '200': { description: Lista administrativa de categorias. }, '403': { description: Apenas administrador. } }
+      summary: Fila de denúncias de anúncios
+      description: Moderador/administrador.
+      operationId: get_api_moderation_reports
+      tags:
+      - moderation
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/moderation/profile-reports:
+    get:
+      summary: Fila de denúncias de perfis
+      description: Moderador/administrador.
+      operationId: get_api_moderation_profile_reports
+      tags:
+      - moderation
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/moderation/claims:
+    get:
+      summary: Fila de reivindicações para moderação
+      description: Moderador/administrador.
+      operationId: get_api_moderation_claims
+      tags:
+      - moderation
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/moderation/log:
+    get:
+      summary: Consultar log de moderação
+      description: Moderador/administrador.
+      operationId: get_api_moderation_log
+      tags:
+      - moderation
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/reports/{id}/decision:
+    post:
+      summary: Analisar denúncia de anúncio
+      description: 'Body: decision Manter anúncio/Ocultar anúncio e note (justificativa).'
+      operationId: post_api_reports_id_decision
+      tags:
+      - reports
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/profile-reports/{id}/decision:
+    post:
+      summary: Analisar denúncia de perfil
+      description: 'Body: decision Procedente/Improcedente e note (justificativa).'
+      operationId: post_api_profile_reports_id_decision
+      tags:
+      - profile-reports
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/admin/categories:
+    get:
+      summary: Listar categorias (admin)
+      description: Apenas administrador; consulte api-local.md para o formato retornado.
+      operationId: get_api_admin_categories
+      tags:
+      - admin
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
     post:
       summary: Criar categoria
+      description: Apenas administrador; corpo descrito em api-local.md.
+      operationId: post_api_admin_categories
+      tags:
+      - admin
+      responses:
+        '201':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [nome]
-              properties:
-                nome: { type: string, maxLength: 80 }
-                descricao: { type: string, maxLength: 255, nullable: true }
-      responses: { '201': { description: Categoria criada. }, '422': { description: Nome duplicado ou dados inválidos. } }
-  /admin/categories/{id}:
-    patch:
-      summary: Atualizar categoria ou ativação sem apagar anúncios antigos
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                nome: { type: string, maxLength: 80 }
-                descricao: { type: string, maxLength: 255, nullable: true }
-                ativo: { type: boolean }
-      responses: { '200': { description: Categoria atualizada. }, '404': { description: Categoria não encontrada. }, '422': { description: Dados inválidos. } }
-  /admin/locations:
-    get: { summary: Listar locais administrativos, responses: { '200': { description: Locais e pontos vinculados. } } }
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/admin/locations:
+    get:
+      summary: Listar locais (admin)
+      description: Apenas administrador; consulte api-local.md para o formato retornado.
+      operationId: get_api_admin_locations
+      tags:
+      - admin
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
     post:
-      summary: Criar local do campus
+      summary: Criar local
+      description: Apenas administrador; corpo descrito em api-local.md.
+      operationId: post_api_admin_locations
+      tags:
+      - admin
+      responses:
+        '201':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [nome]
-              properties:
-                nome: { type: string, maxLength: 120 }
-                bloco: { type: string, maxLength: 80, nullable: true }
-      responses: { '201': { description: Local criado. }, '422': { description: Dados inválidos. } }
-  /admin/locations/{id}:
-    patch:
-      summary: Atualizar ou desativar local
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                nome: { type: string, maxLength: 120 }
-                bloco: { type: string, maxLength: 80, nullable: true }
-                ativo: { type: boolean }
-      responses: { '200': { description: Local atualizado. }, '404': { description: Local não encontrado. } }
-  /admin/guard-points:
-    get: { summary: Listar pontos de guarda administrativos, responses: { '200': { description: Pontos de guarda e seus locais. } } }
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/admin/guard-points:
+    get:
+      summary: Listar pontos de guarda (admin)
+      description: Apenas administrador; consulte api-local.md para o formato retornado.
+      operationId: get_api_admin_guard_points
+      tags:
+      - admin
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
     post:
       summary: Criar ponto de guarda
+      description: Apenas administrador; corpo descrito em api-local.md.
+      operationId: post_api_admin_guard_points
+      tags:
+      - admin
+      responses:
+        '201':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [local_id, nome]
-              properties:
-                local_id: { type: string, format: uuid }
-                nome: { type: string, maxLength: 120 }
-                referencia: { type: string, maxLength: 255, nullable: true }
-      responses: { '201': { description: Ponto criado. }, '422': { description: Local inexistente ou dados inválidos. } }
-  /admin/guard-points/{id}:
-    patch:
-      summary: Atualizar ou desativar ponto de guarda
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                local_id: { type: string, format: uuid }
-                nome: { type: string, maxLength: 120 }
-                referencia: { type: string, maxLength: 255, nullable: true }
-                ativo: { type: boolean }
-      responses: { '200': { description: Ponto atualizado. }, '404': { description: Ponto não encontrado. } }
-  /admin/users:
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/admin/domains:
     get:
-      summary: Listar usuários
-      responses: { '200': { description: Lista administrativa sem hashes de senha ou tokens. }, '403': { description: Apenas administrador. } }
-  /admin/users/{id}/role:
+      summary: Listar domínios institucionais (admin)
+      description: Apenas administrador; consulte api-local.md para o formato retornado.
+      operationId: get_api_admin_domains
+      tags:
+      - admin
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+    post:
+      summary: Criar domínio institucional
+      description: Apenas administrador; corpo descrito em api-local.md.
+      operationId: post_api_admin_domains
+      tags:
+      - admin
+      responses:
+        '201':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+  /api/admin/users:
+    get:
+      summary: Listar usuários (admin)
+      description: Apenas administrador; consulte api-local.md para o formato retornado.
+      operationId: get_api_admin_users
+      tags:
+      - admin
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+  /api/admin/categories/{id}:
+    patch:
+      summary: Atualizar categoria
+      description: Apenas administrador; corpo descrito em api-local.md.
+      operationId: patch_api_admin_categories_id
+      tags:
+      - admin
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/admin/locations/{id}:
+    patch:
+      summary: Atualizar local
+      description: Apenas administrador; corpo descrito em api-local.md.
+      operationId: patch_api_admin_locations_id
+      tags:
+      - admin
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/admin/guard-points/{id}:
+    patch:
+      summary: Atualizar ponto de guarda
+      description: Apenas administrador; corpo descrito em api-local.md.
+      operationId: patch_api_admin_guard_points_id
+      tags:
+      - admin
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/admin/domains/{id}:
+    patch:
+      summary: Atualizar domínio institucional
+      description: Apenas administrador; corpo descrito em api-local.md.
+      operationId: patch_api_admin_domains_id
+      tags:
+      - admin
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/admin/users/{id}/role:
     patch:
       summary: Alterar papel de usuário
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+      description: 'Apenas administrador. Body: role Estudante/Moderador/Administrador.'
+      operationId: patch_api_admin_users_id_role
+      tags:
+      - admin
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, required: [papel], properties: { papel: { type: string, enum: [USUARIO, MODERADOR, ADMINISTRADOR] } } }
-      responses: { '200': { description: Perfil atualizado. }, '404': { description: Usuário não encontrado. } }
-  /admin/users/{id}/status:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+  /api/admin/users/{id}/status:
     patch:
-      summary: Suspender ou reativar usuário e revogar tokens ao suspender
-      parameters: [{ in: path, name: id, required: true, schema: { type: string, format: uuid } }]
+      summary: Alterar status de usuário
+      description: 'Apenas administrador. Body: status Ativo/Suspenso.'
+      operationId: patch_api_admin_users_id_status
+      tags:
+      - admin
+      responses:
+        '200':
+          description: Operação concluída.
+        '400':
+          description: Entrada ou regra de negócio inválida.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Sessão ausente ou expirada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Acesso não autorizado para este papel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso não encontrado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflito de estado ou duplicidade.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security:
+      - BearerToken: []
       requestBody:
         required: true
         content:
           application/json:
-            schema: { type: object, required: [status], properties: { status: { type: string, enum: [ATIVO, SUSPENSO] } } }
-      responses: { '200': { description: Status atualizado. }, '404': { description: Usuário não encontrado. } }
-  /admin/domains:
-    get: { summary: Listar domínios institucionais permitidos, responses: { '200': { description: Domínios cadastrados. } } }
-    post:
-      summary: Adicionar domínio institucional permitido para cadastro
-      requestBody:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              _comment: Campos variam por endpoint; consultar docs/api/api-local.md.
+      parameters:
+      - name: id
+        in: path
         required: true
-        content:
-          application/json:
-            schema: { type: object, required: [dominio], properties: { dominio: { type: string, maxLength: 190, example: alunos.instituicao.br } } }
-      responses: { '201': { description: Domínio adicionado. }, '422': { description: Domínio inválido ou duplicado. } }
-  /admin/domains/{id}:
-    patch:
-      summary: Ativar ou desativar domínio institucional
-      parameters: [{ in: path, name: id, required: true, schema: { type: integer } }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object, required: [ativo], properties: { ativo: { type: boolean } } }
-      responses: { '200': { description: Domínio atualizado. }, '404': { description: Domínio não encontrado. } }
+        schema:
+          type: integer
+          minimum: 1

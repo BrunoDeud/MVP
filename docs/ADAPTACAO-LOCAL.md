@@ -1,32 +1,31 @@
-# Adaptação para apresentação local
+# Adaptação da arquitetura técnica para execução local
 
-Esta versão mantém o objetivo do projeto acadêmico Encontrei — Achados e Perdidos e os principais fluxos demonstráveis, mas simplifica a arquitetura para que a aplicação possa ser executada num computador com o mínimo de configuração.
+## Motivo da adaptação
 
-## Arquitetura da versão atual
+A arquitetura de referência do planejamento anterior previa React + Laravel + MySQL. Para possibilitar a execução e a demonstração do MVP em computadores com poucas dependências, a implementação foi simplificada para Python com módulos da biblioteca padrão, interface web nativa e SQLite. A substituição está registrada nos ADRs 001–004.
 
-- **Interface:** HTML, CSS e JavaScript nativos em `index.html`.
-- **Servidor e API:** Python 3.10 ou superior, usando a biblioteca padrão, especialmente `http.server` e `json`.
-- **Persistência:** SQLite via `sqlite3`; o arquivo `data/encontrei.sqlite3` é criado automaticamente.
-- **Arquivos de imagem:** armazenados localmente em `uploads/`.
-- **Inicialização:** `executar.bat` inicia o servidor e abre o navegador em `http://127.0.0.1:8000`.
-- **Dependências externas:** nenhuma biblioteca Python, pacote npm ou serviço de banco separado.
+## Componentes da implementação
 
-As escolhas atuais estão registradas nos [ADRs](ADRs/README.md). Os ADRs anteriores que definiam React, Laravel e MySQL foram substituídos para a versão local simplificada.
+- **Frontend:** `index.html`, HTML5/CSS3/JavaScript nativos.
+- **Backend e API:** `app.py`, servidor HTTP baseado em `http.server`, rotas JSON, validações, autorização e regras de negócio.
+- **Banco:** SQLite gerenciado pela biblioteca `sqlite3`, arquivo `data/encontrei.sqlite3`.
+- **Fotos:** diretório `uploads/`, servido pelo próprio servidor local.
+- **Testes:** `test_app.py`, `unittest`, chamadas HTTP contra um servidor de teste e banco SQLite temporário.
+- **Execução:** `executar.bat` no Windows ou `python app.py` em terminal.
 
-## Documentação de origem e implementação atual
+## Requisitos atendidos pela versão
 
-Os requisitos, histórias de usuário, regras de negócio e wireframes originais continuam sendo a referência de escopo desejado. Nem todos os itens dessa especificação estão implementados nesta versão local; os limites conhecidos estão listados no `README.md` principal.
+A implementação inclui login, cadastro de conta com domínio autorizado e fluxo local de verificação, publicação/busca/edição de anúncios, foto validada, categorias e locais administráveis, reivindicações com verificação e aprovação/recusa, mensagens internas, confirmação de devolução, histórico, notificações in-app, correspondências iniciais, denúncias de item e perfil, fila e decisões de moderação, ponto de guarda, expiração, administração e restrições de publicação.
 
-O [DER](Modelagem-de-dados/der.md) descreve as tabelas SQLite da implementação atual. O contrato OpenAPI que originalmente acompanhava a arquitetura Laravel foi preservado como referência do desenho técnico anterior; ele não deve ser usado como contrato exato da API local. Os endpoints atuais estão descritos em [API local](api/api-local.md).
+O link de reenvio de verificação também está disponível no modal de login. O link de reenvio de verificação também está disponível no modal de login. O mapeamento por requisito, história, regra, API e testes está em [`implementacao/escopo-mvp.md`](implementacao/escopo-mvp.md). A API está documentada em [`api/api-local.md`](api/api-local.md) e [`api/openapi.yaml`](api/openapi.yaml). O DER atual está em [`Modelagem-de-dados/der.md`](Modelagem-de-dados/der.md).
 
-## Funcionalidades principais demonstráveis
+## Limites explícitos
 
-A versão local inclui consulta e filtros, detalhes, publicação, fotos locais, pergunta e resposta de verificação, reivindicação, aprovação/recusa, mensagens após aprovação, resolução de anúncios, denúncias e um painel básico de moderação.
+- O link de verificação é criado e validado pela aplicação. Sem SMTP configurado, ele é disponibilizado para abrir manualmente; o backend agora pode enviar e-mails de verificação e notificações se as variáveis `ENCONTREI_SMTP_*` forem configuradas antes do início do servidor.
+- As notificações internas são persistidas no SQLite. A preferência de e-mail é editável na interface. O envio externo só ocorre quando SMTP está configurado e o usuário verificado habilitou a preferência; sem SMTP, a aplicação não envia e-mail.
+- A manutenção automática roda quando o servidor inicia, ao receber requisições e por thread daemon a cada 60 segundos enquanto o processo está ligado. Não é um worker separado e não opera quando a aplicação está fechada.
+- A autenticação guarda tokens em memória, não em cookies de sessão persistentes; tokens são perdidos ao reiniciar o servidor.
+- `http.server` e SQLite local são apropriados para demonstração acadêmica, não para expor na internet ou atender concorrência de produção.
+- O processo de descarte/doação física de objetos depois do prazo de guarda deve seguir a política da instituição; o sistema registra expiração/avisos, mas não decide nem executa descarte físico.
 
-## Limitações
-
-- É uma aplicação de demonstração local, não para exposição direta na internet.
-- As contas de demonstração já são criadas no primeiro início; cadastro e verificação de e-mail institucional real não estão integrados.
-- Não há envio real de e-mails, expiração agendada, notificações externas ou todos os painéis administrativos da arquitetura original.
-- Tokens ficam em memória e expiram quando o servidor é reiniciado.
-- As fotos e o banco são armazenados no computador local.
+Esses limites são apresentados de forma explícita para não declarar como implantados serviços externos que não fazem parte deste pacote.

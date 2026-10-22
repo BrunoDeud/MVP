@@ -10,7 +10,6 @@ ENCONTREI — EXECUTAR A DEMONSTRAÇÃO LOCAL
 5. NÃO feche a janela preta enquanto estiver apresentando.
 6. Para encerrar, clique na janela preta e pressione Ctrl+C.
 
-
 CONTA MAIS FÁCIL PARA COMEÇAR
 Estudante: estudante@campus.edu.br
 Senha: Estudante@12345
