@@ -1,0 +1,18 @@
+ENCONTREI — EXECUTAR A DEMONSTRAÇÃO LOCAL
+
+1. Extraia o arquivo ZIP inteiro para uma pasta.
+2. É necessário Python 3.10 ou mais recente. Se não estiver instalado, baixe em:
+   https://www.python.org/downloads/windows/
+   IMPORTANTE: marque “Add python.exe to PATH” na instalação.
+3. Dê dois cliques em executar.bat.
+4. O navegador deve abrir automaticamente. Se não abrir, visite:
+   http://127.0.0.1:8000
+5. NÃO feche a janela preta enquanto estiver apresentando.
+6. Para encerrar, clique na janela preta e pressione Ctrl+C.
+
+
+CONTA MAIS FÁCIL PARA COMEÇAR
+Estudante: estudante@campus.edu.br
+Senha: Estudante@12345
+
+Outras contas e instruções estão no README.md.

@@ -1,69 +1,100 @@
-### Diagrama Entidade-Relacionamento
+# Diagrama Entidade-Relacionamento (DER) — versão local simplificada
+
+Este DER corresponde ao esquema SQLite criado pela função `init_db()` em `app.py`. Ele representa o banco que é realmente utilizado pela versão simplificada, e não o esquema planejado originalmente para Laravel/MySQL.
 
 ```mermaid
 erDiagram
-    USUARIO ||--o{ ITEM : publica
-    USUARIO ||--o{ REIVINDICACAO : solicita
-    USUARIO ||--o{ MENSAGEM : envia
-    USUARIO ||--o{ DENUNCIA : registra
-    USUARIO ||--o{ NOTIFICACAO : recebe
-    USUARIO ||--o{ LOG_MODERACAO : executa
-    CATEGORIA ||--o{ ITEM : classifica
-    LOCAL_CAMPUS ||--o{ ITEM : ocorre_em
-    PONTO_GUARDA ||--o{ ITEM : armazena
-    LOCAL_CAMPUS ||--o{ PONTO_GUARDA : abriga
-    ITEM ||--o{ ITEM_FOTO : possui
-    ITEM ||--o{ REIVINDICACAO : recebe
-    ITEM ||--o{ DENUNCIA : alvo
-    REIVINDICACAO ||--o{ MENSAGEM : contem
-    ITEM }o--o{ ITEM : correspondencia
+    USERS ||--o{ ITEMS : publica
+    USERS ||--o{ CLAIMS : solicita
+    ITEMS ||--o{ CLAIMS : recebe
+    USERS ||--o{ REPORTS : denuncia
+    ITEMS ||--o{ REPORTS : recebe
+    USERS ||--o{ MESSAGES : envia
+    CLAIMS ||--o{ MESSAGES : possui
+    USERS ||--o{ MODERATION_ACTIONS : executa
+    ITEMS o|--o{ MODERATION_ACTIONS : referencia
+    REPORTS o|--o{ MODERATION_ACTIONS : analisa
+    USERS o|--o{ CLAIMS : decide
 
-    USUARIO {
-        uuid id PK
-        string nome
-        string email UK
-        string senha_hash
-        string papel
-        string status
-        timestamp criado_em
+    USERS {
+        integer id PK
+        text name
+        text email UK
+        text role
+        text salt
+        text password_hash
+        text created_at
     }
-    ITEM {
-        uuid id PK
-        uuid usuario_id FK
-        uuid categoria_id FK
-        uuid local_id FK
-        uuid ponto_guarda_id FK
-        string tipo
-        string titulo
-        text descricao
-        date data_ocorrencia
-        string pergunta_verificacao
-        string resposta_verificacao
-        string status
-        timestamp expira_em
-        timestamp criado_em
+    ITEMS {
+        integer id PK
+        text title
+        text type
+        text category
+        text description
+        text location
+        text event_date
+        text status
+        integer owner_id FK
+        text verification_question
+        text verification_answer
+        text photos_json
+        text created_at
+        text updated_at
     }
-    REIVINDICACAO {
-        uuid id PK
-        uuid item_id FK
-        uuid solicitante_id FK
-        text resposta_verificacao
-        string status
-        text motivo_recusa
-        timestamp criado_em
-        timestamp decidido_em
+    CLAIMS {
+        integer id PK
+        integer item_id FK
+        integer claimant_id FK
+        text answer
+        text status
+        text created_at
+        text updated_at
+        integer decision_by FK
+        text decision_note
+    }
+    REPORTS {
+        integer id PK
+        integer item_id FK
+        integer reporter_id FK
+        text reason
+        text status
+        text created_at
+    }
+    MODERATION_ACTIONS {
+        integer id PK
+        integer moderator_id FK
+        integer item_id FK
+        integer report_id FK
+        text action
+        text justification
+        text created_at
+    }
+    MESSAGES {
+        integer id PK
+        integer claim_id FK
+        integer sender_id FK
+        text body
+        text created_at
     }
 ```
 
-### Relacionamentos e restrições
+## Tabelas e relacionamentos
 
-- Usuário 1:N Item; Usuário 1:N Reivindicação; Usuário 1:N Notificação.
-- Categoria 1:N Item; Local 1:N Item; Ponto de guarda 1:N Item.
-- Item 1:N Item\_foto (máximo de 3, garantido por restrição ordem BETWEEN 1 AND 3 e unicidade de item\_id + ordem).
-- Item 1:N Reivindicação; Reivindicação 1:N Mensagem.
-- Item N:N Item via Correspondência (perdido × achado).
-- Índice único parcial em reivindicacao (item\_id, solicitante\_id) onde status in (PENDENTE, APROVADA), garantindo a RN08.
-- Índice único parcial em reivindicacao (item\_id) onde status = APROVADA, garantindo a RN09.
-- Índice único em denuncia (item\_id, denunciante\_id), garantindo a regra de denúncia única (CA09.2).
-- Restrição CHECK: itens do tipo ACHADO exigem pergunta\_verificacao não nula (RN05).
-- Índices recomendados: item (status, tipo, categoria\_id, local\_id, criado\_em DESC) e GIN em item.busca (RNF01).
+- **`users`** armazena contas de demonstração. `email` é único, sem diferenciar maiúsculas de minúsculas. A senha não é guardada em texto puro: o sistema armazena um salt e o hash PBKDF2.
+- **`items`** armazena anúncios de achados e perdidos. `owner_id` referencia quem publicou o anúncio. `photos_json` guarda uma lista de caminhos de imagem em formato JSON textual, e as imagens ficam no diretório `uploads/`.
+- **`claims`** registra reivindicações de um item por um usuário. `decision_by` é opcional e referencia o usuário que tomou a decisão.
+- **`reports`** registra denúncias. A combinação `(item_id, reporter_id)` é única, impedindo a mesma conta de denunciar repetidamente o mesmo item.
+- **`moderation_actions`** registra decisões de moderação com justificativa. As referências a item e denúncia podem ser nulas quando a ação não está ligada a uma denúncia específica.
+- **`messages`** guarda mensagens da conversa associada a uma reivindicação aprovada.
+
+## Integridade e regras relevantes
+
+- O SQLite é acessado por `sqlite3`, e `PRAGMA foreign_keys = ON` é ativado em cada conexão.
+- `items.type` aceita `Achado` ou `Perdido`; o estado inicial do anúncio é `Aberto`.
+- O índice único parcial `one_active_claim_per_user_item` impede mais de uma reivindicação `Pendente` ou `Aprovada` da mesma conta para o mesmo item.
+- As tabelas utilizam chaves primárias autoincrementais. As relações entre anúncios, reivindicações, denúncias, mensagens e ações de moderação são protegidas por chaves estrangeiras.
+- As validações adicionais (como foto obrigatória para item achado, pergunta/resposta de verificação, limites de publicação, permissões e estados) são aplicadas pela lógica da aplicação em `app.py`.
+
+## Limitações desta modelagem local
+
+Este é um esquema pequeno, voltado para execução em uma máquina e apresentação acadêmica. Categorias e locais são textos em `items`, em vez de entidades normalizadas; fotos são guardadas em uma lista JSON; não existem as tabelas separadas de notificações, correspondências, domínios institucionais e pontos de guarda planejadas para a arquitetura original. A resposta de verificação permanece armazenada em `items.verification_answer` no banco local, embora não seja exposta pela consulta pública de detalhes. Não use esta configuração para dados sensíveis ou produção.
