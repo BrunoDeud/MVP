@@ -8,7 +8,7 @@
 python -m unittest -v test_app.py
 ```
 
-A suíte contém 31 testes, usa HTTP real contra uma instância temporária do backend e não modifica o banco persistente da demonstração. O teste 27 usa um cliente SMTP simulado e não envia mensagens reais. Os testes abaixo foram executados na versão deste pacote e passaram. A interface é servida por `/`; o código JavaScript inline também foi validado sintaticamente com `node --check`. O contrato OpenAPI foi analisado como YAML válido. A navegação interativa com navegador gráfico não foi considerada evidência automatizada nesta execução porque o navegador disponível no ambiente de validação bloqueia o acesso local; recomenda-se abrir o sistema localmente para a verificação visual final.
+A suíte contém 47 testes (os de 32 a 47 cobrem as correções de segurança de `docs/seguranca/correcoes.md`), usa HTTP real contra uma instância temporária do backend e não modifica o banco persistente da demonstração. O teste 27 usa um cliente SMTP simulado e não envia mensagens reais. Os testes abaixo foram executados na versão deste pacote e passaram. A interface é servida por `/`; o código JavaScript inline também foi validado sintaticamente com `node --check`. O contrato OpenAPI foi analisado como YAML válido. A navegação interativa com navegador gráfico não foi considerada evidência automatizada nesta execução porque o navegador disponível no ambiente de validação bloqueia o acesso local; recomenda-se abrir o sistema localmente para a verificação visual final.
 
 | Teste | História / requisito relacionado | Cenário verificado | Resultado esperado | Evidência automatizada |
 |---|---|---|---|---|
@@ -43,6 +43,22 @@ A suíte contém 31 testes, usa HTTP real contra uma instância temporária do b
 | 29 | US09 / RF12–RF13 | Denúncia de anúncio duplicada e decisão de moderação | Repetição recebe 409; decisão de manter é auditada e o anúncio continua aberto | Passou |
 | 30 | US06 / RF07, RF10 | Recusa de reivindicação com motivo | Estado recusado é persistido e notificação chega ao solicitante | Passou |
 | 31 | US01 / RF01 / CA01.4 | Reenvio de verificação expirada | Token expirado é recusado; novo token é criado e ativa a conta | Passou |
+| 32 | Segurança V01/V08 | Cadastro fora do modo demonstração | Link não volta na API; e-mail existente e inexistente têm a mesma resposta | Passou |
+| 33 | Segurança V02/V11 | Respostas erradas na pergunta de verificação | Bloqueio após 3 erros (429), publicador avisado, resposta guardada como HMAC | Passou |
+| 34 | Segurança V03 | Denúncias de contas recém-criadas | Anúncio não é ocultado automaticamente | Passou |
+| 35 | Segurança NV05 | Dispensa de denúncias em item guardado ou resolvido | Status anterior é restaurado; item encerrado não é reaberto | Passou |
+| 36 | Segurança NV03 | Denúncias procedentes contra a equipe e caso em causa própria | Administrador não é suspenso; moderador não decide sobre o próprio anúncio | Passou |
+| 37 | Segurança NV04/V12 | Aprovar e confirmar devolução com item oculto | 409 enquanto oculto; devolução não pode ser repetida | Passou |
+| 38 | Segurança V04/NV06 | Inicialização com e sem modo demonstração | Suspensão persiste; fora do demo não há contas públicas e senhas públicas são trocadas | Passou |
+| 39 | Segurança NV07 | Cabeçalho Host desconhecido | HTTP 421 | Passou |
+| 40 | Segurança NV08/V06 | Login repetido, e-mail gigante e senha comum | 429 por IP+e-mail e por conta; chaves limitadas; senha comum recusada | Passou |
+| 41 | Segurança V06 | Login com hash legado de 120 mil iterações | Hash migrado para 600 mil iterações | Passou |
+| 42 | Segurança V09/NV09 | Edição de fotos inválida | 400 sem arquivos órfãos; item não-objeto não gera 500 | Passou |
+| 43 | Segurança V10 | Fotos JPEG/PNG/WEBP com metadados | EXIF, textos e comentários removidos | Passou |
+| 44 | Segurança V11 | Token de verificação no banco | Guardado como SHA-256 | Passou |
+| 45 | Segurança V05/V13 | Cabeçalhos, cookie de sessão e CSRF | CSP/X-Frame-Options presentes; cookie HttpOnly; POST com cookie sem cabeçalho é recusado | Passou |
+| 46 | Segurança V15 | SMTP com usuário e sem TLS/SSL | Envio recusado, sem conexão | Passou |
+| 47 | Segurança V07/V06 | Sessão ociosa e corpo grande em rota pública | Sessão expira; corpo acima de 64 KB recebe 413 | Passou |
 
 ## O que a suíte não pretende provar
 

@@ -173,7 +173,7 @@ paths:
     post:
       summary: Cadastrar conta
       description: 'Cria uma conta pendente de verificação. Body: name, email, password, password_confirmation.
-        No modo local devolve verification_url.'
+        Devolve verification_url somente no modo demonstração (--demo) sem SMTP.'
       operationId: post_api_register
       tags:
       - register

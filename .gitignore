@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
 data/*.sqlite3
+data/secret.key
 uploads/*
 !uploads/.gitkeep
+
+brag-output/

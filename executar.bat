@@ -14,7 +14,7 @@ if not errorlevel 1 (
     python --version >nul 2>&1
     if not errorlevel 1 (
         echo Iniciando com Python...
-        python app.py
+        python app.py %*
         goto :fim
     )
 )
@@ -25,7 +25,7 @@ if not errorlevel 1 (
     py -3 --version >nul 2>&1
     if not errorlevel 1 (
         echo Iniciando com o launcher py...
-        py -3 app.py
+        py -3 app.py %*
         goto :fim
     )
 )
