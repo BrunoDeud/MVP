@@ -5,8 +5,9 @@ Contrato da implementação atual (`app.py`), não do desenho anterior Laravel. 
 ## Convenções
 
 - JSON UTF-8 em requests com corpo.
-- Para endpoints autenticados: `Authorization: Bearer <token>`; o token é retornado por `POST /api/login` e expira após 8 horas ou no encerramento do servidor.
-- Códigos frequentes: `200` sucesso, `201` criado, `400` validação/parâmetro inválido, `401` sem sessão/expirada, `403` papel ou acesso insuficiente, `404` recurso/rota inexistente, `409` conflito/duplicidade/regra de estado, `410` link de verificação expirado, `413` corpo acima do limite, `500` falha inesperada.
+- Para endpoints autenticados: `Authorization: Bearer <token>` (clientes de API) ou o cookie `enc_session` (`HttpOnly; SameSite=Strict`, usado pelo navegador). Ambos são retornados por `POST /api/login`. A sessão expira após 12 horas, após 2 horas sem uso ou no encerramento do servidor. Com o cookie, `POST`/`PATCH`/`DELETE` exigem o cabeçalho `X-Encontrei: 1` (proteção CSRF).
+- O cabeçalho `Host` precisa ser `127.0.0.1`, `localhost` ou `[::1]` na porta do servidor; outros recebem `421`.
+- Códigos frequentes: `200` sucesso, `201` criado, `400` validação/parâmetro inválido, `401` sem sessão/expirada, `403` papel ou acesso insuficiente, `404` recurso/rota inexistente, `409` conflito/duplicidade/regra de estado, `410` link de verificação expirado, `413` corpo acima do limite (64 KB, ou 24 MB nas rotas autenticadas com fotos), `421` Host não permitido, `429` limite de tentativas, `500` falha inesperada.
 - Erros de API usam `{ "error": "mensagem legível" }`. O backend não retorna stack trace ao navegador; detalhes inesperados vão para o terminal local.
 - Datas usam `AAAA-MM-DD`; timestamps usam ISO local.
 - Fotos são uma lista `photos` de objetos `{ "mime": "image/png", "data": "data:image/png;base64,..." }`. Máximo três, JPG/JPEG, PNG ou WEBP, 5 MB por imagem, com verificação da assinatura do arquivo.
@@ -15,12 +16,12 @@ Contrato da implementação atual (`app.py`), não do desenho anterior Laravel. 
 
 | Método | Caminho | Acesso | Descrição |
 |---|---|---|---|
-| `GET` | `/api/health` | Público | Confere o banco e responde estado, nome e total de itens. |
+| `GET` | `/api/health` | Público | Confere o banco e responde apenas `{"ok": true}`. |
 | `GET` | `/api/config` | Público | Lista categorias e locais ativos para os formulários. |
-| `POST` | `/api/register` | Público | Cadastra usuário como pendente. Body: `name`, `email`, `password`, `password_confirmation`. Retorna `verification_url` no modo local. |
+| `POST` | `/api/register` | Público | Cadastra usuário como pendente. Body: `name`, `email`, `password`, `password_confirmation`. A resposta é a mesma para e-mails novos e já cadastrados. Retorna `verification_url` somente no modo demonstração (`--demo`) sem SMTP. Limite: 10 cadastros por IP por hora. |
 | `GET` | `/api/verify-email?token=...` | Link secreto | Verifica e ativa a conta se o token não expirou (24 horas). Retorna HTML explicativo. |
-| `POST` | `/api/resend-verification` | Público | Solicita novo link para uma conta pendente. Body: `email`. A URL é devolvida para uso local e, quando configurado, também enviada por SMTP. |
-| `POST` | `/api/login` | Público | Autentica por `email` e `password`; retorna `token`, usuário e expiração. |
+| `POST` | `/api/resend-verification` | Público | Solicita novo link para uma conta pendente. Body: `email`. Sempre responde a mesma mensagem genérica. O link é enviado por SMTP; sem SMTP, aparece no terminal do servidor (no modo demonstração, também na resposta). Limite: 5 por IP e 3 por e-mail a cada 15 min. |
+| `POST` | `/api/login` | Público | Autentica por `email` e `password`; retorna `token` e usuário e define o cookie `enc_session`. Limites: 30 tentativas por minuto por IP, 8 por minuto por IP + e-mail e bloqueio de 15 min após 10 erros na mesma conta (`429`). |
 | `POST` | `/api/logout` | Token | Invalida a sessão atual. |
 | `GET` | `/api/me` | Token | Retorna dados públicos da conta autenticada. |
 | `PATCH` | `/api/me/preferences` | Token | Atualiza `email_notifications` booleano; o envio depende das variáveis SMTP opcionais. |
@@ -47,7 +48,7 @@ Contrato da implementação atual (`app.py`), não do desenho anterior Laravel. 
 | `GET` | `/api/items/{id}/claims` | Dono ou moderação | Lista reivindicações do anúncio, sem expor resposta privada. |
 | `GET` | `/api/items/{id}/matches` | Dono ou moderação | Sugere até cinco anúncios opostos que compartilham categoria, local/bloco e janela temporal direcional de até 15 dias após a data da perda. |
 | `GET` | `/api/items/{id}/history` | Dono ou moderação | Lista eventos de histórico do anúncio. |
-| `POST` | `/api/items/{id}/claims` | Token | Cria reivindicação de achado. Body: `answer`. Bloqueia autorrivindicação, item encerrado, resposta incorreta, duplicidade ativa e nova solicitação quando já há reivindicação aprovada. |
+| `POST` | `/api/items/{id}/claims` | Token | Cria reivindicação de achado. Body: `answer`. Bloqueia autorrivindicação, item encerrado, resposta incorreta, duplicidade ativa e nova solicitação quando já há reivindicação aprovada. Cada usuário pode errar a resposta 3 vezes por item em 24 h, e o item aceita 10 erros no total; depois disso a rota responde `429`. |
 | `POST` | `/api/items/{id}/reports` | Token | Denuncia anúncio. Body: `reason` (5–500 caracteres); impede autodenúncia e duplicidade por usuário. |
 | `POST` | `/api/guard-points/items` | Moderador/administrador | Registra achado recebido num ponto de guarda. Requer `guard_point_id`, local compatível, foto e pergunta/resposta quando aplicável. |
 | `GET` | `/api/my/items` | Token | Lista os próprios anúncios. |
@@ -108,4 +109,4 @@ Contrato da implementação atual (`app.py`), não do desenho anterior Laravel. 
 
 As rotas validam dados no servidor, ainda que o navegador também aplique validação HTML. O SQLite aplica chaves primárias/estrangeiras, valores `CHECK`, unicidade e índices; regras entre vários registros são validadas na camada de negócio.
 
-A verificação de e-mail usa link de uso único com expiração de 24 horas. Sem servidor SMTP configurado, `/api/register` e `/api/resend-verification` retornam a URL local para conclusão manual; com as variáveis `ENCONTREI_SMTP_*`, a aplicação também tenta enviá-la por e-mail. Notificações in-app são sempre persistidas no banco; e-mails de notificação são tentados quando o usuário verificou a conta, habilitou a preferência e SMTP está configurado. O servidor é para demonstração local, não para exposição direta na internet.
+A verificação de e-mail usa link de uso único com expiração de 24 horas. Com as variáveis `ENCONTREI_SMTP_*`, o link é enviado por e-mail. Sem SMTP, ele aparece somente no terminal do servidor; `/api/register` e `/api/resend-verification` só o devolvem na resposta no modo demonstração (`--demo`). Notificações in-app são sempre persistidas no banco; e-mails de notificação são tentados quando o usuário verificou a conta, habilitou a preferência e SMTP está configurado. O servidor é para demonstração local, não para exposição direta na internet.

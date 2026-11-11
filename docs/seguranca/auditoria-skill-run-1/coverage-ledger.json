@@ -1,0 +1,2573 @@
+[
+ {
+  "coverage_id": "app.py%23GET%20%2Fapi%2Fitems%2F%7Bid%7D%2Fverification-question%3B%20POST%20%2Fapi%2Fitems%2F%7Bid%7D%2Fclaims::app.py%23Handler.do_POST%20claims%20verification_answer%20comparison::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Business%20logic",
+  "canonical_refs": {
+   "surface": "app.py#GET /api/items/{id}/verification-question; POST /api/items/{id}/claims",
+   "boundary": "app.py#Handler.do_POST claims verification_answer comparison",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Business logic"
+  },
+  "surface": "Claim submission with verification answer",
+  "boundary": "Ownership proof before claim creation",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Business logic",
+  "starting_paths": [
+   "app.py",
+   "test_app.py"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Business logic",
+  "selected_companion_blocks": [],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "candidate",
+  "agent_id": "h2-claims",
+  "reviewed_paths": [
+   "app.py",
+   "test_app.py"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h2-claims",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Ownership proof via the private verification answer must not be brute-forceable: wrong answers counted and limited per claimant and item",
+    "method": "source",
+    "result": "Fails: app.py:983 compares norm(stored) with norm(answer); mismatch returns a distinct 400 with no state written, no counter, lockout, delay or owner notification. Only LOGIN_ATTEMPTS limits anything (login only). Question is given to any verified non-owner (792-797). Deciders never see the submitted answer (802).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h2-claims",
+    "reviewed_paths": [
+     "app.py",
+     "test_app.py"
+    ],
+    "invariant": "No duplicate active claims and no claim on own, ineligible or already-approved items",
+    "method": "source",
+    "result": "Holds: self-claim check (978), type/status gate (979), approved pre-check (980-981), unique index one_active_claim_per_user_item (289-290) mapped to 409; hidden items 404 to non-owners (790). Tests 175-183 cover wrong-answer/duplicate/post-approval; none covers repeated wrong answers.",
+    "artifact": null
+   },
+   {
+    "agent_id": "v05",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Independent candidate validation and final record verification (quick profile, Phase 3+5 merged)",
+    "method": "source",
+    "result": "Re-read every cited source line; source trace holds and no visible control refutes it; decision needs_validation because the bounded local result requires an OS sandbox unavailable on this host.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [
+   "app.py:claims:verification-answer-unlimited-attempts"
+  ],
+  "unresolved": [],
+  "x_unit_key": "U03",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_hardening": [
+   "A moderator can approve a claim they filed themselves (/api/claims/{id}/decision, app.py:1001-1002); add claimant_id != user.id for separation of duties.",
+   "/api/claims/{id}/returned does not check returned_at, so it can be replayed, rewriting history and notifications (app.py:1039-1042)."
+  ],
+  "x_final_decision": {
+   "app.py:claims:verification-answer-unlimited-attempts": "needs_validation"
+  }
+ },
+ {
+  "coverage_id": "app.py%23Handler.body_json%3B%20ThreadingHTTPServer%3B%20LOGIN_ATTEMPTS%3B%20TOKENS::app.py%23MAX_BODY%20and%20in-memory%20dictionaries::profile%2Fquick%2Fall-in-scope-subsystems::RESOURCE-EXHAUSTION-AND-AVAILABILITY.md%23Unbounded%20buffering%20and%20cardinality",
+  "canonical_refs": {
+   "surface": "app.py#Handler.body_json; ThreadingHTTPServer; LOGIN_ATTEMPTS; TOKENS",
+   "boundary": "app.py#MAX_BODY and in-memory dictionaries",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality"
+  },
+  "surface": "Request bodies, threads and in-memory state",
+  "boundary": "Shared process capacity",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Unbounded buffering and cardinality",
+  "starting_paths": [
+   "app.py"
+  ],
+  "ordinary_attack_class_block": null,
+  "selected_companion_blocks": [
+   "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Core discipline",
+   "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+   "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+   "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+   "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Universal moves",
+   "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Validation rules"
+  ],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "candidate",
+  "agent_id": "h4-files",
+  "reviewed_paths": [
+   "app.py",
+   "test_app.py"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h4-files",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Request bodies capped before buffering",
+    "method": "source",
+    "result": "body_json (626-638) rejects Content-Length > 24 MiB before reading; read before auth on every POST/PATCH (902, 1236). Transient per-request memory only.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h4-files",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Pre-auth LOGIN_ATTEMPTS keys have bounded length, cardinality and cleanup",
+    "method": "source",
+    "result": "Fails: key = client_ip + ':' + email with no length check (940-941; register/resend cap at 190, 906/928); inserted before lookup/auth (944); stale keys never removed (942 filters only on reuse; maintenance 565-598 ignores it). Varying the email bypasses the 8/min limit and retains each key.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h4-files",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "TOKENS bounded and expired entries reclaimed",
+    "method": "source",
+    "result": "Created only after successful verified login (951), fixed-size keys, reclaimed when presented or on suspension: hardening only.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h4-files",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Concurrency bounded and slow connections time out",
+    "method": "source",
+    "result": "Unbounded thread per connection (1396) and no Handler timeout (634); bound to 127.0.0.1 (31): hardening.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h4-files",
+    "reviewed_paths": [
+     "test_app.py"
+    ],
+    "invariant": "Tests cover login-attempt growth",
+    "method": "source",
+    "result": "Only clears LOGIN_ATTEMPTS in setup (test_app.py:32); no length or cleanup test.",
+    "artifact": null
+   },
+   {
+    "agent_id": "v02",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Independent candidate validation and final record verification (quick profile, Phase 3+5 merged)",
+    "method": "source",
+    "result": "Re-read every cited source line; source trace holds and no visible control refutes it; decision needs_validation because the bounded local result requires an OS sandbox unavailable on this host.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [
+   "app.py:Handler.do_POST:/api/login:LOGIN_ATTEMPTS-unbounded-key-retention"
+  ],
+  "unresolved": [],
+  "x_unit_key": "U09",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_hardening": [
+   "Unbounded thread per connection (app.py:1396) and no Handler timeout: slow senders hold threads in rfile.read (634); loopback-only via HOST (31).",
+   "Expired TOKENS (35, 951) reclaimed only when presented or on suspension; add a sweep.",
+   "body_json parses up to 24 MiB before authentication (902, 1236); consider per-route body caps.",
+   "PATCH loop lacks isinstance(image, dict) (1263) giving 500; len(photo_urls)>3 at 1271 is dead code.",
+   "PATCH lacks the explicit empty-binary check of create_item (1196 vs 1267); magic check still rejects, no impact.",
+   "GET /uploads/{name} serves photos of hidden items without auth (708-720); 128-bit random names require prior URL knowledge."
+  ],
+  "x_final_decision": {
+   "app.py:Handler.do_POST:/api/login:LOGIN_ATTEMPTS-unbounded-key-retention": "needs_validation"
+  }
+ },
+ {
+  "coverage_id": "app.py%23Handler.create_item%20photos%3B%20PATCH%20%2Fapi%2Fitems%2F%7Bid%7D%20photos%3B%20GET%20%2Fuploads%2F%7Bname%7D::app.py%23photo%20validation%20and%20uploads%20basename%20check::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Resource%20and%20file%20handling",
+  "canonical_refs": {
+   "surface": "app.py#Handler.create_item photos; PATCH /api/items/{id} photos; GET /uploads/{name}",
+   "boundary": "app.py#photo validation and uploads basename check",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Resource and file handling"
+  },
+  "surface": "Photo upload, replacement and serving",
+  "boundary": "Upload validation and upload directory confinement",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Resource and file handling",
+  "starting_paths": [
+   "app.py"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Resource and file handling",
+  "selected_companion_blocks": [],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "candidate",
+  "agent_id": "h4-files",
+  "reviewed_paths": [
+   "app.py",
+   "test_app.py"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h4-files",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "GET /uploads/{name} cannot read outside UPLOAD_DIR",
+    "method": "source",
+    "result": "Holds: Path(rest).name must equal the remainder and not start with '.' (709-711); separators/drive prefixes rejected; no percent-decoding; served with guessed image MIME and nosniff (716-718).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h4-files",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "create_item validates all photos before writing; server-generated names",
+    "method": "source",
+    "result": "Holds: validation into 'prepared' (1189-1199) before writes with token_hex names (1220-1224); 10 open / 5 per day limits (1201-1204).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h4-files",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "PATCH photo replacement writes only after all validation and cleans up on failure",
+    "method": "source",
+    "result": "Fails: write inside loop (1270) before later photos and location (1272 -> 409-413) are validated; non-dict element -> AttributeError 500 (1263); DB rollback (85-87) leaves files; cleanup only on success (1275-1280); no uploads sweep; no PATCH quota.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h4-files",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Deletion confined to UPLOAD_DIR and server-recorded URLs",
+    "method": "source",
+    "result": "Holds: photos_json holds only server-generated or seed names; unlink uses UPLOAD_DIR / Path(url).name (1278, 1384).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h4-files",
+    "reviewed_paths": [
+     "test_app.py"
+    ],
+    "invariant": "Tests cover PATCH failure cleanup",
+    "method": "source",
+    "result": "No test checks UPLOAD_DIR after a failed PATCH (only create magic 149 and >3 photos 299-303).",
+    "artifact": null
+   },
+   {
+    "agent_id": "v01",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Independent candidate validation and final record verification (quick profile, Phase 3+5 merged)",
+    "method": "source",
+    "result": "Re-read every cited source line; source trace holds and no visible control refutes it; decision needs_validation because the bounded local result requires an OS sandbox unavailable on this host.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [
+   "app.py:Handler.do_PATCH:/api/items:photo-write-before-validate-orphan-files"
+  ],
+  "unresolved": [],
+  "x_unit_key": "U08",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_hardening": [
+   "Unbounded thread per connection (app.py:1396) and no Handler timeout: slow senders hold threads in rfile.read (634); loopback-only via HOST (31).",
+   "Expired TOKENS (35, 951) reclaimed only when presented or on suspension; add a sweep.",
+   "body_json parses up to 24 MiB before authentication (902, 1236); consider per-route body caps.",
+   "PATCH loop lacks isinstance(image, dict) (1263) giving 500; len(photo_urls)>3 at 1271 is dead code.",
+   "PATCH lacks the explicit empty-binary check of create_item (1196 vs 1267); magic check still rejects, no impact.",
+   "GET /uploads/{name} serves photos of hidden items without auth (708-720); 128-bit random names require prior URL knowledge."
+  ],
+  "x_final_decision": {
+   "app.py:Handler.do_PATCH:/api/items:photo-write-before-validate-orphan-files": "needs_validation"
+  }
+ },
+ {
+  "coverage_id": "app.py%23PATCH%20%2Fapi%2Fadmin%2Fdomains%2F%7Bid%7D%3B%20PATCH%20%2Fapi%2Fadmin%2Fguard-points%2F%7Bid%7D%3B%20PATCH%20%2Fapi%2Fadmin%2Fcategories%2F%7Bid%7D::app.py%23catalog%20deactivation%20enforcement%20after%20issuance::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Business%20logic",
+  "canonical_refs": {
+   "surface": "app.py#PATCH /api/admin/domains/{id}; PATCH /api/admin/guard-points/{id}; PATCH /api/admin/categories/{id}",
+   "boundary": "app.py#catalog deactivation enforcement after issuance",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Business logic"
+  },
+  "surface": "Admin catalog changes vs existing accounts and items",
+  "boundary": "Revocation of admin-managed catalog state",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Business logic",
+  "starting_paths": [
+   "app.py"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Business logic",
+  "selected_companion_blocks": [],
+  "excluded_blocks": [
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; examined as business logic."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "deferred",
+  "agent_id": null,
+  "reviewed_paths": [],
+  "local_checks": [],
+  "result_fingerprints": [],
+  "unresolved": [
+   "quick_profile_final_critic: Critic: domain deactivation (1325-1328) never re-checked at verify-email (691-696) or login (945-951); guard-point deactivation drops items from expiry (584); requires_guard toggle (1295-1296) leaves existing items."
+  ],
+  "x_unit_key": "U14"
+ },
+ {
+  "coverage_id": "app.py%23POST%20%2Fapi%2Fclaims%2F%7Bid%7D%2Fdecision%3B%20POST%20%2Fapi%2Fclaims%2F%7Bid%7D%2Freturned%3B%20GET%2FPOST%20%2Fapi%2Fclaims%2F%7Bid%7D%2Fmessages::app.py%23Handler%20claim%20owner%2Fparticipant%20checks::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Access%20control",
+  "canonical_refs": {
+   "surface": "app.py#POST /api/claims/{id}/decision; POST /api/claims/{id}/returned; GET/POST /api/claims/{id}/messages",
+   "boundary": "app.py#Handler claim owner/participant checks",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Access control"
+  },
+  "surface": "Claim decision, return and private chat",
+  "boundary": "Owner, staff and participant authority over claims",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Access control",
+  "starting_paths": [
+   "app.py"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Access control",
+  "selected_companion_blocks": [],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "covered",
+  "agent_id": "h2-claims",
+  "reviewed_paths": [
+   "app.py"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h2-claims",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Only owner (non-guard) or staff decide; guard claims need moderator; decided once; at most one approval per item",
+    "method": "source",
+    "result": "Holds: require_moderator for guard (1001), owner-or-staff (1002), Pendente (1003), pre-check (1005-1006) plus unique index one_approved_claim_per_item (316) mapped to 409 (1009-1010); other pending claims cancelled (1012).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h2-claims",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Only owner or staff confirm a return; guard needs moderator; only Aprovada claims",
+    "method": "source",
+    "result": "Holds for authority (1036-1038). Item status unchecked: reported under U05.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h2-claims",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Only owner and claimant of an Aprovada claim read/post messages",
+    "method": "source",
+    "result": "Holds: participant and Aprovada checks on GET (846-847) and POST (1159-1160); staff excluded (test_app.py:188); sender is the session user.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [],
+  "unresolved": [],
+  "x_unit_key": "U04",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_hardening": [
+   "A moderator can approve a claim they filed themselves (/api/claims/{id}/decision, app.py:1001-1002); add claimant_id != user.id for separation of duties.",
+   "/api/claims/{id}/returned does not check returned_at, so it can be replayed, rewriting history and notifications (app.py:1039-1042)."
+  ]
+ },
+ {
+  "coverage_id": "app.py%23POST%20%2Fapi%2Fitems%2F%7Bid%7D%2Freports%3B%20POST%20%2Fapi%2Fusers%2F%7Bid%7D%2Freports%3B%20GET%20%2Fapi%2Fitems::app.py%23report%20auto-hide%20threshold%20and%20search%20status%20filters::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Feature%20abuse%20and%20data%20leakage",
+  "canonical_refs": {
+   "surface": "app.py#POST /api/items/{id}/reports; POST /api/users/{id}/reports; GET /api/items",
+   "boundary": "app.py#report auto-hide threshold and search status filters",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Feature abuse and data leakage"
+  },
+  "surface": "Reports, search and enumeration side effects",
+  "boundary": "Moderation thresholds and information exposure",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Feature abuse and data leakage",
+  "starting_paths": [
+   "app.py"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Feature abuse and data leakage",
+  "selected_companion_blocks": [],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "candidate",
+  "agent_id": "h3-authz-r2",
+  "reviewed_paths": [
+   "README.md",
+   "app.py",
+   "docs/requisitos/regras-de-negocios.md"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h3-authz-r2",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "GET /api/items status filter does not expose Oculto items to non-moderators or verification secrets",
+    "method": "source",
+    "result": "Allowlisted filter (749-755); Oculto requires moderator (752-753); unknown values 400; bound params; item_public (427-435) omits verification fields. Resolvido/Expirado listings public by design.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h3-authz-r2",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Hidden and nonexistent items indistinguishable to non-privileged callers on GET /api/items/{id}",
+    "method": "source",
+    "result": "Same 404 (670 vs 790-791) before subactions; history/claims/matches owner-or-staff (798-814); find_matches only Aberto/guard (531).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h3-authz-r2",
+    "reviewed_paths": [
+     "app.py",
+     "docs/requisitos/regras-de-negocios.md",
+     "README.md"
+    ],
+    "invariant": "Auto-hide applies only to listed items and dismissal restores the prior status",
+    "method": "source",
+    "result": "Fails: reports accepted on any status (item_row 668-671); at 3 reporters status='Oculto' without storing prior status (1053-1054); 'Manter anúncio' restores 'Aberto' unconditionally (1083-1085).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h3-authz-r2",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Profile reports limited to one per reporter/target",
+    "method": "source",
+    "result": "Auth required, self-report rejected (1062, CHECK 244), UNIQUE(target_user_id, reporter_id) (243). 404 vs 201 id oracle adds nothing since owner_id is public (434).",
+    "artifact": null
+   },
+   {
+    "agent_id": "v07",
+    "reviewed_paths": [
+     "app.py",
+     "docs/requisitos/regras-de-negocios.md"
+    ],
+    "invariant": "Independent candidate validation and final record verification (quick profile, Phase 3+5 merged)",
+    "method": "source",
+    "result": "Re-read every cited source line; source trace holds and no visible control refutes it; decision needs_validation because the bounded local result requires an OS sandbox unavailable on this host.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [
+   "app.py:item-report-dismissal-restores-aberto-ignoring-prior-status"
+  ],
+  "unresolved": [],
+  "x_unit_key": "U07",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_reassignment_note": "h3-authz returned malformed (non-JSON) result; discarded unrepaired and reassigned to fresh owner within wave 1.",
+  "x_hardening": [
+   "Item reports on hidden items return 201 while GET returns 404 (app.py:1044-1051): minor existence oracle.",
+   "A moderator can decide reports they filed (app.py:1073, 1099); consider decision_by != reporter_id.",
+   "Upheld count is per report, not per incident (app.py:1090): 3 upheld reports on one listing suspend the owner.",
+   "LIKE wildcards not escaped (app.py:760-763): no security impact."
+  ],
+  "x_final_decision": {
+   "app.py:item-report-dismissal-restores-aberto-ignoring-prior-status": "needs_validation"
+  }
+ },
+ {
+  "coverage_id": "app.py%23POST%20%2Fapi%2Flogin%20LOGIN_ATTEMPTS%3B%20Handler.create_item%20quotas%3B%20POST%20%2Fapi%2Fitems%2F%7Bid%7D%2Freports%20auto-hide::app.py%23non-atomic%20check-then-act%20without%20DB_LOCK::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Business%20logic",
+  "canonical_refs": {
+   "surface": "app.py#POST /api/login LOGIN_ATTEMPTS; Handler.create_item quotas; POST /api/items/{id}/reports auto-hide",
+   "boundary": "app.py#non-atomic check-then-act without DB_LOCK",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Business logic"
+  },
+  "surface": "Unlocked check-then-act paths",
+  "boundary": "Atomicity under ThreadingHTTPServer",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Business logic",
+  "starting_paths": [
+   "app.py"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Business logic",
+  "selected_companion_blocks": [],
+  "excluded_blocks": [
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; examined as business logic."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "deferred",
+  "agent_id": null,
+  "reviewed_paths": [],
+  "local_checks": [],
+  "result_fingerprints": [],
+  "unresolved": [
+   "quick_profile_final_critic: Critic: login limiter (942-944), create_item quotas (1201-1204) and auto-hide count (1052-1053) are unlocked read-then-write under ThreadingHTTPServer (1396); DB_LOCK only at 146 and 570."
+  ],
+  "x_unit_key": "U15"
+ },
+ {
+  "coverage_id": "app.py%23POST%20%2Fapi%2Flogin%3B%20POST%20%2Fapi%2Flogout%3B%20Handler.current_user::app.py%23Handler.current_user::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Cryptography%20and%20secrets",
+  "canonical_refs": {
+   "surface": "app.py#POST /api/login; POST /api/logout; Handler.current_user",
+   "boundary": "app.py#Handler.current_user",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Cryptography and secrets"
+  },
+  "surface": "Login and bearer session",
+  "boundary": "Credential to session and session lifecycle",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Cryptography and secrets",
+  "starting_paths": [
+   "app.py",
+   "index.html"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Cryptography and secrets",
+  "selected_companion_blocks": [
+   "WEB-PROTOCOL-AND-AUTH.md#Core discipline",
+   "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+   "WEB-PROTOCOL-AND-AUTH.md#Universal moves",
+   "WEB-PROTOCOL-AND-AUTH.md#Validation rules"
+  ],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "covered",
+  "agent_id": "h1-auth",
+  "reviewed_paths": [
+   "app.py",
+   "index.html"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h1-auth",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Session tokens and password hashes use strong randomness and correct key derivation with constant-time comparison",
+    "method": "source",
+    "result": "Token secrets.token_urlsafe(32) (app.py:951); PBKDF2-HMAC-SHA256 120000 iterations with per-user secrets.token_hex(16) salt (app.py:70-73); hmac.compare_digest (app.py:948). No weaker fallback; SMTP errors print only exception type (app.py:495).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h1-auth",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Login issues a session only for a correct password on a verified, Ativo account and fails closed",
+    "method": "source",
+    "result": "Order: rate limit (941-944), lookup (945-946), digest compare (947-948), verified check (949), Ativo check (950), then token (951). Same 401 for unknown user and wrong password. Rate-limit key uses the same strip().lower() canonical email as the NOCASE lookup.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h1-auth",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Bearer consumption enforces expiry and current account state; revocation on logout and suspension",
+    "method": "source",
+    "result": "current_user (640-658) evicts expired tokens and re-reads the user, requiring Ativo and email_verified. Logout pops the token (954); suspensions evict tokens (1093-1094, 1113-1114, 1348-1349). Server-minted tokens, so no fixation; no password-change path.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h1-auth",
+    "reviewed_paths": [
+     "index.html"
+    ],
+    "invariant": "Client stores and clears the bearer token consistently with the server lifecycle",
+    "method": "source",
+    "result": "localStorage enc_token (index.html:22,33); logout clears storage even if the API call fails (index.html:35); startup validates via /api/me and clears on failure (index.html:91). Storage disclosure belongs to peer unit U10.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [],
+  "unresolved": [],
+  "x_unit_key": "U02",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_hardening": [
+   "Login skips PBKDF2 for unknown emails (app.py:946) and /api/resend-verification returns 404 vs 400 vs 200 (app.py:931-932): account-existence enumeration by timing or response; institutional emails are semi-public, so not a finding.",
+   "PBKDF2-HMAC-SHA256 at 120000 iterations (app.py:72) is below current OWASP guidance (600000).",
+   "Login rate limit keyed per IP plus email (app.py:941); spraying across accounts or from many IPs is not limited.",
+   "Sessions have no per-user cap and no rotation; logout revokes only the presented token."
+  ]
+ },
+ {
+  "coverage_id": "app.py%23POST%20%2Fapi%2Fregister%3B%20POST%20%2Fapi%2Fresend-verification%3B%20GET%20%2Fapi%2Fverify-email::app.py%23Handler.do_POST%20register%20domain%20allowlist%20and%20verification%20token::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Business%20logic",
+  "canonical_refs": {
+   "surface": "app.py#POST /api/register; POST /api/resend-verification; GET /api/verify-email",
+   "boundary": "app.py#Handler.do_POST register domain allowlist and verification token",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Business logic"
+  },
+  "surface": "Account registration and email verification",
+  "boundary": "Institutional email ownership before account activation",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Business logic",
+  "starting_paths": [
+   "app.py",
+   "index.html",
+   "test_app.py"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Business logic",
+  "selected_companion_blocks": [
+   "WEB-PROTOCOL-AND-AUTH.md#Core discipline",
+   "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+   "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+   "WEB-PROTOCOL-AND-AUTH.md#Universal moves",
+   "WEB-PROTOCOL-AND-AUTH.md#Validation rules"
+  ],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "candidate",
+  "agent_id": "h1-auth",
+  "reviewed_paths": [
+   "app.py",
+   "docs/api/api-local.md",
+   "index.html",
+   "test_app.py"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h1-auth",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Account activation requires proof of control of the institutional mailbox",
+    "method": "source",
+    "result": "Violated: /api/register returns verification_url with the token to the unauthenticated requester unconditionally (app.py:923,926); /api/resend-verification mints and returns a new token for any non-Ativo account by email (927-938); GET /api/verify-email activates the token's account (688-698).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h1-auth",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Domain allowlist, uniqueness, token randomness, expiry and one-time use",
+    "method": "source",
+    "result": "Exact domain match against active institutional_domains (912-915); UNIQUE NOCASE email (151, 916); token_urlsafe(32) with 24 h expiry (918-919, 933); verify requires Pendente, checks expiry and nulls the token (691-696). Suspenso accounts cannot be reactivated via verify. Only failure is in-band disclosure.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h1-auth",
+    "reviewed_paths": [
+     "test_app.py",
+     "index.html",
+     "docs/api/api-local.md"
+    ],
+    "invariant": "Intended behaviour and test coverage of in-band link disclosure",
+    "method": "source",
+    "result": "docs/api/api-local.md:20 says verification_url is returned only in local mode, but the code returns it unconditionally; test_app.py:120-130 and 455-470 activate accounts from the response URL; index.html:34 shows the link only when verification_email_sent is false.",
+    "artifact": null
+   },
+   {
+    "agent_id": "v08",
+    "reviewed_paths": [
+     "app.py",
+     "docs/api/api-local.md",
+     "test_app.py"
+    ],
+    "invariant": "Independent candidate validation and final record verification (quick profile, Phase 3+5 merged)",
+    "method": "source",
+    "result": "Re-read every cited source line; source trace holds and no visible control refutes it; decision needs_validation because the bounded local result requires an OS sandbox unavailable on this host.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [
+   "app.py:register-resend-verification-url-returned-in-response"
+  ],
+  "unresolved": [],
+  "x_unit_key": "U01",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_hardening": [
+   "Login skips PBKDF2 for unknown emails (app.py:946) and /api/resend-verification returns 404 vs 400 vs 200 (app.py:931-932): account-existence enumeration by timing or response; institutional emails are semi-public, so not a finding.",
+   "PBKDF2-HMAC-SHA256 at 120000 iterations (app.py:72) is below current OWASP guidance (600000).",
+   "Login rate limit keyed per IP plus email (app.py:941); spraying across accounts or from many IPs is not limited.",
+   "Sessions have no per-user cap and no rotation; logout revokes only the presented token."
+  ],
+  "x_final_decision": {
+   "app.py:register-resend-verification-url-returned-in-response": "needs_validation"
+  }
+ },
+ {
+  "coverage_id": "app.py%23all%20routes%3B%20index.html::app.py%23Handler::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Wildcard",
+  "canonical_refs": {
+   "surface": "app.py#all routes; index.html",
+   "boundary": "app.py#Handler",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Wildcard"
+  },
+  "surface": "Unassigned behaviour",
+  "boundary": "Any boundary outside the standard classes",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Wildcard",
+  "starting_paths": [
+   "app.py",
+   "index.html",
+   "test_app.py"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Wildcard",
+  "selected_companion_blocks": [],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "candidate",
+  "agent_id": "h5-client",
+  "reviewed_paths": [
+   "README.md",
+   "app.py",
+   "index.html",
+   "test_app.py"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h5-client",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "A loopback-only server must bind requests to its own origin (Host/Origin validation)",
+    "method": "source",
+    "result": "HOST='127.0.0.1' (31, 1396); no handler reads Host or Origin (683, 899, 1234, 1366); do_OPTIONS (676-681) sends no Allow-Origin. A rebound origin would be served and could log in with published seed admin credentials (333).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h5-client",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "API calls the frontend never makes must not bypass controls",
+    "method": "source",
+    "result": "Route table matches docs/api/api-local.md; only /api/items/categories, /api/items/locations and do_OPTIONS are undocumented and harmless; no debug/test/impersonation route.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h5-client",
+    "reviewed_paths": [
+     "app.py",
+     "test_app.py"
+    ],
+    "invariant": "Untested edge cases (console, email subject, maintenance) create no security effect",
+    "method": "source",
+    "result": "log_message (604-605) prints the raw request line (terminal escape injection, cosmetic); email Subject uses literal titles only (475); maintenance uses server timestamps. No tests for Host header, seed restart or cross-origin.",
+    "artifact": null
+   },
+   {
+    "agent_id": "v03",
+    "reviewed_paths": [
+     "README.md",
+     "app.py",
+     "index.html"
+    ],
+    "invariant": "Independent candidate validation and final record verification (quick profile, Phase 3+5 merged)",
+    "method": "source",
+    "result": "Re-read every cited source line; source trace holds and no visible control refutes it; decision needs_validation because the bounded local result requires an OS sandbox unavailable on this host.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [
+   "app.py:Handler:missing-host-validation-dns-rebinding-loopback-api"
+  ],
+  "unresolved": [],
+  "x_unit_key": "U13",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_hardening": [
+   "No Content-Security-Policy or X-Frame-Options/frame-ancestors on HTML responses (app.py:617-624, 699-707).",
+   "Handler.log_message (app.py:604-605) prints the raw request line, allowing terminal escape injection into the operator console.",
+   "Unauthenticated POSTs accept any Content-Type (app.py:626-638): blind cross-site text/plain requests can squat pending accounts or trip the login limiter; require application/json and validate Origin.",
+   "Hardcoded published seed credentials incl. Administrador (app.py:330-335, README.md:123-128, index.html:31); gate seeding behind a demo flag.",
+   "GET /api/items LIKE filters do not escape % and _ (app.py:760-763); affects only the requester's results."
+  ],
+  "x_final_decision": {
+   "app.py:Handler:missing-host-validation-dns-rebinding-loopback-api": "needs_validation"
+  }
+ },
+ {
+  "coverage_id": "app.py%23claim%20and%20account%20lifecycle%20routes::app.py%23item%2Fclaim%20status%20transitions::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Chained%20vulnerabilities%20and%20trust%20boundaries",
+  "canonical_refs": {
+   "surface": "app.py#claim and account lifecycle routes",
+   "boundary": "app.py#item/claim status transitions",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Chained vulnerabilities and trust boundaries"
+  },
+  "surface": "Cross-step claim and account chains",
+  "boundary": "Lifecycle state consistency between items, claims, reports and accounts",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Chained vulnerabilities and trust boundaries",
+  "starting_paths": [
+   "app.py"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Chained vulnerabilities and trust boundaries",
+  "selected_companion_blocks": [],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "candidate",
+  "agent_id": "h2-claims",
+  "reviewed_paths": [
+   "app.py"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h2-claims",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Claim transitions must not move a moderation-hidden (Oculto) item into a public state",
+    "method": "source",
+    "result": "Fails: /returned (1030-1043) checks only claim status (1038) then unconditionally sets items.status='Resolvido' (1040); /decision ignores item status. Resolvido items are public via GET /api/items/{id} (790 blocks only Oculto) and ?status=Resolvido (751-753). No re-hide route; DELETE refused once claims exist.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h2-claims",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Concurrent creation/approval cannot yield two approvals or duplicate active claims",
+    "method": "source",
+    "result": "Holds via partial unique indexes (289-290, 316); per-request connection commits at exit (77-89).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h2-claims",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Maintenance routing/expiry does not grant decision authority to the wrong principal",
+    "method": "source",
+    "result": "Holds: maintenance (565-598) sets routed_to_moderation and expires items without changing authority.",
+    "artifact": null
+   },
+   {
+    "agent_id": "v04",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Independent candidate validation and final record verification (quick profile, Phase 3+5 merged)",
+    "method": "source",
+    "result": "Re-read every cited source line; source trace holds and no visible control refutes it; decision needs_validation because the bounded local result requires an OS sandbox unavailable on this host.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [
+   "app.py:claim-transitions:item-status-unchecked"
+  ],
+  "unresolved": [],
+  "x_unit_key": "U05",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_hardening": [
+   "A moderator can approve a claim they filed themselves (/api/claims/{id}/decision, app.py:1001-1002); add claimant_id != user.id for separation of duties.",
+   "/api/claims/{id}/returned does not check returned_at, so it can be replayed, rewriting history and notifications (app.py:1039-1042)."
+  ],
+  "x_final_decision": {
+   "app.py:claim-transitions:item-status-unchecked": "needs_validation"
+  }
+ },
+ {
+  "coverage_id": "app.py%23init_db%3B%20repository%20files::app.py%23init_db%20seed%20accounts::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Obvious%20things",
+  "canonical_refs": {
+   "surface": "app.py#init_db; repository files",
+   "boundary": "app.py#init_db seed accounts",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Obvious things"
+  },
+  "surface": "Repository defaults, seeds and exposures",
+  "boundary": "Default credentials, debug and configuration exposure",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Obvious things",
+  "starting_paths": [
+   "app.py",
+   "index.html",
+   ".gitignore",
+   "executar.bat",
+   "COMECE-AQUI.txt",
+   "README.md"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Obvious things",
+  "selected_companion_blocks": [],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "candidate",
+  "agent_id": "h5-client",
+  "reviewed_paths": [
+   ".gitignore",
+   "COMECE-AQUI.txt",
+   "README.md",
+   "app.py",
+   "executar.bat",
+   "index.html"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h5-client",
+    "reviewed_paths": [
+     "app.py",
+     "index.html",
+     "README.md",
+     "COMECE-AQUI.txt"
+    ],
+    "invariant": "Seed/demo credentials must not keep working and suspensions must persist",
+    "method": "source",
+    "result": "init_db seeds four fixed-password accounts incl. admin (330-341), published in README.md:123-128, COMECE-AQUI.txt and index.html:31; on every start UPDATE users SET status='Ativo',email_verified=1 (342-343) reverts suspensions (1346, 1092, 1112). No password-change route.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h5-client",
+    "reviewed_paths": [
+     "app.py",
+     ".gitignore",
+     "executar.bat",
+     "README.md"
+    ],
+    "invariant": "No committed secrets, debug mode, unprotected debug endpoints, stack traces, eval/exec, permissive CORS, cookies or open redirects",
+    "method": "source",
+    "result": "No .env/key/sqlite tracked; .gitignore covers data, uploads, __pycache__; SMTP creds env-only (445-464); no eval/exec/subprocess/pickle; no debug flag; /api/health exposes only item count; generic 500 bodies (897, 1171, 1364, 1390); no ACAO, no cookies, no redirects; plain HTTP on loopback as documented.",
+    "artifact": null
+   },
+   {
+    "agent_id": "v06",
+    "reviewed_paths": [
+     "README.md",
+     "app.py"
+    ],
+    "invariant": "Independent candidate validation and final record verification (quick profile, Phase 3+5 merged)",
+    "method": "source",
+    "result": "Re-read every cited source line; source trace holds and no visible control refutes it; decision needs_validation because the bounded local result requires an OS sandbox unavailable on this host.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [
+   "app.py:init_db:seed-accounts-reactivated-on-start"
+  ],
+  "unresolved": [],
+  "x_unit_key": "U12",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_hardening": [
+   "No Content-Security-Policy or X-Frame-Options/frame-ancestors on HTML responses (app.py:617-624, 699-707).",
+   "Handler.log_message (app.py:604-605) prints the raw request line, allowing terminal escape injection into the operator console.",
+   "Unauthenticated POSTs accept any Content-Type (app.py:626-638): blind cross-site text/plain requests can squat pending accounts or trip the login limiter; require application/json and validate Origin.",
+   "Hardcoded published seed credentials incl. Administrador (app.py:330-335, README.md:123-128, index.html:31); gate seeding behind a demo flag.",
+   "GET /api/items LIKE filters do not escape % and _ (app.py:760-763); affects only the requester's results."
+  ],
+  "x_final_decision": {
+   "app.py:init_db:seed-accounts-reactivated-on-start": "needs_validation"
+  }
+ },
+ {
+  "coverage_id": "app.py%23item%20CRUD%2C%20moderation%20and%20%2Fapi%2Fadmin%20routes::app.py%23Handler.require_moderator%3B%20Handler.require_admin%3B%20inline%20owner%20checks::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Access%20control",
+  "canonical_refs": {
+   "surface": "app.py#item CRUD, moderation and /api/admin routes",
+   "boundary": "app.py#Handler.require_moderator; Handler.require_admin; inline owner checks",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Access control"
+  },
+  "surface": "Item, moderation and admin routes",
+  "boundary": "Role and owner authorization",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Access control",
+  "starting_paths": [
+   "app.py",
+   "index.html"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Access control",
+  "selected_companion_blocks": [],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "candidate",
+  "agent_id": "h3-authz-r2",
+  "reviewed_paths": [
+   "app.py",
+   "docs/api/api-local.md",
+   "docs/requisitos/regras-de-negocios.md",
+   "index.html"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h3-authz-r2",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Every /api/admin/* route enforces require_admin before state access",
+    "method": "source",
+    "result": "GET 870-890, POST 1121-1151, PATCH 1289-1352 call require_admin first; roles allowlisted (1339); no self-demotion/suspension (1340, 1345); Ativo without verification still blocked by current_user (654).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h3-authz-r2",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Moderation queues, decisions and guard-point creation enforce require_moderator",
+    "method": "source",
+    "result": "850-869, 1073, 1099, 969 call require_moderator; create_item re-checks in guard_mode (1209-1210).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h3-authz-r2",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Edit/resolve/delete restricted to owner or staff; body cannot override ownership/status",
+    "method": "source",
+    "result": "PATCH owner-only and Aberto (1243-1244); UPDATE writes only editable fields (1273); guard categories enforced (1252-1253); resolve owner or staff (1024); DELETE owner or admin with no claims/reports (1374-1377).",
+    "artifact": null
+   },
+   {
+    "agent_id": "h3-authz-r2",
+    "reviewed_paths": [
+     "index.html"
+    ],
+    "invariant": "Client role gating is not the only control",
+    "method": "source",
+    "result": "UI role checks only hide panels (index.html:27, 31, 80); every privileged route has a server check.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h3-authz-r2",
+    "reviewed_paths": [
+     "app.py",
+     "docs/api/api-local.md",
+     "docs/requisitos/regras-de-negocios.md"
+    ],
+    "invariant": "Account suspension is admin-only; no weaker path suspends an Administrador",
+    "method": "source",
+    "result": "Fails: RN18 auto-suspension in /api/profile-reports/{id}/decision (1107-1115) and /api/reports/{id}/decision (1089-1095) needs only require_moderator and suspends any target role, revoking tokens.",
+    "artifact": null
+   },
+   {
+    "agent_id": "v09",
+    "reviewed_paths": [
+     "app.py",
+     "docs/api/api-local.md",
+     "docs/requisitos/regras-de-negocios.md"
+    ],
+    "invariant": "Independent candidate validation and final record verification (quick profile, Phase 3+5 merged)",
+    "method": "source",
+    "result": "Re-read every cited source line; source trace holds and no visible control refutes it; decision needs_validation because the bounded local result requires an OS sandbox unavailable on this host.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [
+   "app.py:report-upheld-auto-suspension-no-target-role-guard"
+  ],
+  "unresolved": [],
+  "x_unit_key": "U06",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_reassignment_note": "h3-authz returned malformed (non-JSON) result; discarded unrepaired and reassigned to fresh owner within wave 1.",
+  "x_hardening": [
+   "Item reports on hidden items return 201 while GET returns 404 (app.py:1044-1051): minor existence oracle.",
+   "A moderator can decide reports they filed (app.py:1073, 1099); consider decision_by != reporter_id.",
+   "Upheld count is per report, not per incident (app.py:1090): 3 upheld reports on one listing suspend the owner.",
+   "LIKE wildcards not escaped (app.py:760-763): no security impact."
+  ],
+  "x_final_decision": {
+   "app.py:report-upheld-auto-suspension-no-target-role-guard": "needs_validation"
+  }
+ },
+ {
+  "coverage_id": "app.py%23sqlite3%20query%20construction::app.py%23sqlite3%20parameter%20binding::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Injection",
+  "canonical_refs": {
+   "surface": "app.py#sqlite3 query construction",
+   "boundary": "app.py#sqlite3 parameter binding",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Injection"
+  },
+  "surface": "Server-side query and command construction",
+  "boundary": "Parameterized SQL and other server sinks",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Injection",
+  "starting_paths": [
+   "app.py"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Injection",
+  "selected_companion_blocks": [],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#DOM-based XSS",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Clickjacking",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "covered",
+  "agent_id": "h5-client",
+  "reviewed_paths": [
+   "app.py"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h5-client",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "All SQL from request data uses parameter binding; no identifier from input",
+    "method": "source",
+    "result": "All db.execute with request data use ? placeholders; f-string SQL in table_columns/ensure_column (92-98) uses only hardcoded names (294-310); /api/items (747-771) appends fixed fragments and binds values with allowlisted status/type. No SQL injection.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h5-client",
+    "reviewed_paths": [
+     "app.py"
+    ],
+    "invariant": "Response headers, email headers, file paths and shell take no unescaped request data",
+    "method": "source",
+    "result": "Headers are constants plus mimetypes on a basename-checked path; email To validated (no whitespace/CRLF), Subject literal, body via set_content; upload names from token_hex; no shell or templates.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [],
+  "unresolved": [],
+  "x_unit_key": "U11",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_hardening": [
+   "No Content-Security-Policy or X-Frame-Options/frame-ancestors on HTML responses (app.py:617-624, 699-707).",
+   "Handler.log_message (app.py:604-605) prints the raw request line, allowing terminal escape injection into the operator console.",
+   "Unauthenticated POSTs accept any Content-Type (app.py:626-638): blind cross-site text/plain requests can squat pending accounts or trip the login limiter; require application/json and validate Origin.",
+   "Hardcoded published seed credentials incl. Administrador (app.py:330-335, README.md:123-128, index.html:31); gate seeding behind a demo flag.",
+   "GET /api/items LIKE filters do not escape % and _ (app.py:760-763); affects only the requester's results."
+  ]
+ },
+ {
+  "coverage_id": "index.html%23innerHTML%20render%20functions::index.html%23esc%20and%20localStorage%20enc_token::profile%2Fquick%2Fall-in-scope-subsystems::ATTACK-CLASSES.md%23Injection",
+  "canonical_refs": {
+   "surface": "index.html#innerHTML render functions",
+   "boundary": "index.html#esc and localStorage enc_token",
+   "subsystem": "profile/quick/all-in-scope-subsystems",
+   "attack_class": "ATTACK-CLASSES.md#Injection"
+  },
+  "surface": "Frontend rendering of API data",
+  "boundary": "API data to DOM and stored bearer token",
+  "subsystem": "All in-scope subsystems (quick profile)",
+  "attack_class": "Injection",
+  "starting_paths": [
+   "index.html",
+   "app.py"
+  ],
+  "ordinary_attack_class_block": "ATTACK-CLASSES.md#Injection",
+  "selected_companion_blocks": [
+   "CLIENT-SIDE.md#Core discipline",
+   "CLIENT-SIDE.md#DOM-based XSS",
+   "CLIENT-SIDE.md#Browser-storage disclosure and stale authorization",
+   "CLIENT-SIDE.md#Clickjacking",
+   "CLIENT-SIDE.md#Universal moves",
+   "CLIENT-SIDE.md#Validation rules"
+  ],
+  "excluded_blocks": [
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Password reset and broader recovery",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Account linking and identity collision",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Session fixation and invalidation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Ordinary CSRF",
+    "reason": "No ambient cookie credential; all state changes require a non-ambient Authorization bearer header (app.py:640-643)."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Cookie scope and transport",
+    "reason": "Application sets no cookies."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Host and forwarded-header trust",
+    "reason": "Links are built from HOST/PORT constants, not request headers (app.py:923,935); assigned to U13 wildcard if relevant."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#JWT verification and claim binding",
+    "reason": "Opaque random tokens, no JWT."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#OAuth/OIDC request and callback binding",
+    "reason": "No federated identity."
+   },
+   {
+    "block": "WEB-PROTOCOL-AND-AUTH.md#Request framing and desynchronization",
+    "reason": "Single stdlib server with no proxy in source."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Credentialed CORS trust",
+    "reason": "No Access-Control-Allow-Origin is ever sent (app.py:676-681)."
+   },
+   {
+    "block": "CLIENT-SIDE.md#Service-worker registration and scope takeover",
+    "reason": "No service worker in index.html."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Unbounded buffering and cardinality",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Pre-authentication work imbalance",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Worker, pool, and priority starvation",
+    "reason": "Selected for a different unit of this run; not this unit's boundary."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Superlinear parsing, matching, or evaluation",
+    "reason": "Assessed only where reachable via U09 body parsing; regexes are anchored simple patterns."
+   },
+   {
+    "block": "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md#Decompression and representation amplification",
+    "reason": "No decompression; base64 decode bounded by MAX_BODY."
+   },
+   {
+    "block": "MEMORY-SAFETY-AND-BINARY.md#Core discipline",
+    "reason": "Pure Python stdlib target; no native/unsafe code."
+   },
+   {
+    "block": "AI-AND-LLM.md#Core discipline",
+    "reason": "No model, prompt, or tool-calling surface in source."
+   },
+   {
+    "block": "SUPPLY-CHAIN-AND-RELEASE.md#Core discipline",
+    "reason": "No dependencies, lockfiles, CI, release or plugin surface."
+   },
+   {
+    "block": "CLOUD-AND-DEPLOYMENT.md#Core discipline",
+    "reason": "No IaC, container, IAM or serverless configuration in repo."
+   },
+   {
+    "block": "PROTOCOLS-RPC-AND-MESSAGING.md#Core discipline",
+    "reason": "HTTP/JSON only; no RPC, broker, queue or webhook."
+   },
+   {
+    "block": "DATA-ISOLATION-AND-LIFECYCLE.md#Core discipline",
+    "reason": "Single-tenant; owner scoping is assessed by Access control units."
+   },
+   {
+    "block": "DESKTOP-MOBILE-AND-LOCAL-IPC.md#Core discipline",
+    "reason": "No native app, deep link, webview or local IPC beyond loopback HTTP."
+   }
+  ],
+  "prior_status": "none",
+  "attempts": [],
+  "wave": 1,
+  "status": "covered",
+  "agent_id": "h5-client",
+  "reviewed_paths": [
+   "app.py",
+   "index.html"
+  ],
+  "local_checks": [
+   {
+    "agent_id": "h5-client",
+    "reviewed_paths": [
+     "index.html",
+     "app.py"
+    ],
+    "invariant": "Every API string written to innerHTML is context-escaped; no stored value reaches JS/URL execution",
+    "method": "source",
+    "result": "esc() (index.html:23) applied to all server strings in every renderer; attributes double-quoted; onclick interpolates only integer ids or literals; unescaped values are server-validated dates (app.py:60-67), INTEGER retention_days (182), booleans, and the uploader's own preview data URL (index.html:54). No location/hash/postMessage source. No DOM XSS.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h5-client",
+    "reviewed_paths": [
+     "index.html",
+     "app.py"
+    ],
+    "invariant": "localStorage bearer token not readable by a less-trusted reader and not usable after logout/revocation",
+    "method": "source",
+    "result": "Written at login (index.html:33), removed at logout (35) after server pop (app.py:953-955), cleared on failed /api/me (91); server revocation on suspension and status re-check (640-658). No third-party script. No finding.",
+    "artifact": null
+   },
+   {
+    "agent_id": "h5-client",
+    "reviewed_paths": [
+     "index.html",
+     "app.py"
+    ],
+    "invariant": "State-changing UI must not complete when framed by another origin",
+    "method": "source",
+    "result": "No X-Frame-Options/frame-ancestors (app.py:699-707), but every state change needs the localStorage bearer token on a loopback app; no complete framed sensitive action established: hardening.",
+    "artifact": null
+   }
+  ],
+  "result_fingerprints": [],
+  "unresolved": [],
+  "x_unit_key": "U10",
+  "x_priority_rationale": "quick profile: all units in wave 1; unauthenticated surfaces (U01,U02,U07,U08,U09,U12) ranked first within each hunter.",
+  "x_hardening": [
+   "No Content-Security-Policy or X-Frame-Options/frame-ancestors on HTML responses (app.py:617-624, 699-707).",
+   "Handler.log_message (app.py:604-605) prints the raw request line, allowing terminal escape injection into the operator console.",
+   "Unauthenticated POSTs accept any Content-Type (app.py:626-638): blind cross-site text/plain requests can squat pending accounts or trip the login limiter; require application/json and validate Origin.",
+   "Hardcoded published seed credentials incl. Administrador (app.py:330-335, README.md:123-128, index.html:31); gate seeding behind a demo flag.",
+   "GET /api/items LIKE filters do not escape % and _ (app.py:760-763); affects only the requester's results."
+  ]
+ }
+]

@@ -29,10 +29,14 @@ class EncontreiAPITests(unittest.TestCase):
         application.DATA_DIR.mkdir(exist_ok=True)
         application.UPLOAD_DIR.mkdir(exist_ok=True)
         application.TOKENS.clear()
-        application.LOGIN_ATTEMPTS.clear()
+        application.RATE_LIMITS.clear()
         application.LAST_MAINTENANCE = 0
-        application.init_db()
-        cls.server = application.ThreadingHTTPServer(("127.0.0.1", 0), application.Handler)
+        # Os testes usam o modo demonstração (contas fictícias e link de verificação na resposta).
+        cls._demo_before = application.DEMO_MODE
+        application.DEMO_MODE = True
+        application.MAX_OPEN_ITEMS = application.MAX_ITEMS_PER_DAY = 100  # vários testes publicam com a mesma conta
+        application.init_db(demo=True)
+        cls.server = application.LocalHTTPServer(("127.0.0.1", 0), application.Handler)
         cls.base_url = f"http://127.0.0.1:{cls.server.server_address[1]}"
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -48,27 +52,37 @@ class EncontreiAPITests(unittest.TestCase):
         cls.server.server_close()
         cls.temp.cleanup()
         application.TOKENS.clear()
+        application.DEMO_MODE = cls._demo_before
+
+    def setUp(self):
+        # Limites de taxa são por IP; cada teste começa com a janela limpa.
+        application.RATE_LIMITS.clear()
 
     @classmethod
-    def request(cls, path, method="GET", body=None, token=None, expected=None):
+    def request(cls, path, method="GET", body=None, token=None, expected=None, headers=None, with_headers=False):
         data = None if body is None else json.dumps(body).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
+        all_headers = {"Content-Type": "application/json"}
         if token:
-            headers["Authorization"] = "Bearer " + token
-        req = urllib.request.Request(cls.base_url + path, data=data, headers=headers, method=method)
+            all_headers["Authorization"] = "Bearer " + token
+        all_headers.update(headers or {})
+        req = urllib.request.Request(cls.base_url + path, data=data, headers=all_headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=8) as res:
+            with urllib.request.urlopen(req, timeout=15) as res:
                 status = res.status
                 raw = res.read().decode("utf-8")
+                response_headers = res.headers
         except urllib.error.HTTPError as e:
             status = e.code
             raw = e.read().decode("utf-8")
+            response_headers = e.headers
         try:
             result = json.loads(raw) if raw else {}
         except json.JSONDecodeError:
             result = {"html": raw}
         if expected is not None and status != expected:
             raise AssertionError(f"{method} {path}: esperado {expected}, recebido {status}: {result}")
+        if with_headers:
+            return status, result, response_headers
         return status, result
 
     @classmethod
@@ -104,8 +118,7 @@ class EncontreiAPITests(unittest.TestCase):
     def test_01_health_and_database(self):
         _, data = self.request("/api/health", expected=200)
         self.assertTrue(data["ok"])
-        self.assertEqual(data["database"], "SQLite")
-        self.assertGreaterEqual(data["items"], 5)
+        self.assertNotIn("items", data)  # V13: não divulga contagem de anúncios
 
     def test_02_seeded_items_and_verification_answer_private(self):
         _, data = self.request("/api/items", expected=200)
@@ -466,6 +479,284 @@ class EncontreiAPITests(unittest.TestCase):
         self.assertNotEqual(token1, token2)
         self.request("/api/verify-email?token=" + urllib.parse.quote(token2), expected=200)
         self.request("/api/login", "POST", {"email": email, "password": "Senha12345"}, expected=200)
+
+    # ------------------------------------------------------------------
+    # Regressão das vulnerabilidades documentadas em docs/seguranca/
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def new_user(cls, email, role=None, aged=False):
+        """Cadastra, verifica (modo demonstração) e autentica uma conta de teste."""
+        _, created = cls.request("/api/register", "POST", {"name": "Conta de Teste", "email": email, "password": "Senha12345", "password_confirmation": "Senha12345"}, expected=201)
+        token = urllib.parse.parse_qs(urllib.parse.urlparse(created["verification_url"]).query)["token"][0]
+        cls.request("/api/verify-email?token=" + urllib.parse.quote(token), expected=200)
+        with application.connect() as db:
+            user_id = db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()[0]
+            if aged:
+                db.execute("UPDATE users SET created_at=? WHERE id=?", ((datetime.now()-timedelta(days=10)).replace(microsecond=0).isoformat(), user_id))
+        if role:
+            cls.request(f"/api/admin/users/{user_id}/role", "PATCH", {"role": role}, token=cls.admin_token, expected=200)
+        return cls.login(email, "Senha12345")["token"], user_id
+
+    @staticmethod
+    def age_seed_accounts():
+        with application.connect() as db:
+            db.execute("UPDATE users SET created_at=? WHERE email LIKE '%@campus.edu.br'", ((datetime.now()-timedelta(days=10)).replace(microsecond=0).isoformat(),))
+
+    def item_status(self, item_id):
+        with application.connect() as db:
+            return db.execute("SELECT status FROM items WHERE id=?", (item_id,)).fetchone()[0]
+
+    def test_32_v01_verification_link_not_returned_outside_demo(self):
+        application.DEMO_MODE = False
+        try:
+            with patch("builtins.print"):
+                _, created = self.request("/api/register", "POST", {"name": "Fora do Demo", "email": "fora.demo@campus.edu.br", "password": "Senha12345", "password_confirmation": "Senha12345"}, expected=201)
+                self.assertNotIn("verification_url", created)
+                self.assertNotIn("user_id", created)
+                # V08: e-mail já cadastrado recebe a mesma resposta (sem 409).
+                _, again = self.request("/api/register", "POST", {"name": "Fora do Demo", "email": "fora.demo@campus.edu.br", "password": "Senha12345", "password_confirmation": "Senha12345"}, expected=201)
+                self.assertEqual(created["message"], again["message"])
+                _, unknown = self.request("/api/resend-verification", "POST", {"email": "ninguem@campus.edu.br"}, expected=200)
+                _, pending = self.request("/api/resend-verification", "POST", {"email": "fora.demo@campus.edu.br"}, expected=200)
+                self.assertEqual(unknown["message"], pending["message"])
+                self.assertNotIn("verification_url", pending)
+            self.request("/api/login", "POST", {"email": "fora.demo@campus.edu.br", "password": "Senha12345"}, expected=403)
+        finally:
+            application.DEMO_MODE = True
+
+    def test_33_v02_claim_answer_attempts_are_limited(self):
+        item = self.create_found(title="Achado com limite de tentativas", token=self.lucas_token)
+        for remaining in (2, 1, 0):
+            _, data = self.request(f"/api/items/{item['id']}/claims", "POST", {"answer": "chute"}, token=self.student_token, expected=400)
+            self.assertIn(str(remaining), data["error"])
+        # Mesmo a resposta certa é recusada depois do bloqueio.
+        self.request(f"/api/items/{item['id']}/claims", "POST", {"answer": "teste azul"}, token=self.student_token, expected=429)
+        _, notes = self.request("/api/notifications", token=self.lucas_token, expected=200)
+        self.assertTrue(any(n["title"] == "Tentativas incorretas" and n["item_id"] == item["id"] for n in notes["notifications"]))
+        with application.connect() as db:
+            stored = db.execute("SELECT verification_answer FROM items WHERE id=?", (item["id"],)).fetchone()[0]
+        self.assertTrue(stored.startswith("hmac$"))  # V11
+        self.assertNotIn("azul", stored)
+
+    def test_34_v03_new_accounts_do_not_auto_hide_items(self):
+        item = self.create_lost(title="Anúncio contra contas novas", token=self.lucas_token)
+        for i in range(3):
+            token, _ = self.new_user(f"fantoche{i}@alunos.campus.edu.br")
+            self.request(f"/api/items/{item['id']}/reports", "POST", {"reason": "Denúncia de conta recém-criada."}, token=token, expected=201)
+        self.assertEqual(self.item_status(item["id"]), "Aberto")
+
+    def test_35_nv05_dismissal_restores_previous_status(self):
+        self.age_seed_accounts()
+        third_token, _ = self.new_user("terceiro.denunciante@campus.edu.br", aged=True)
+        item = self.create_lost(title="Item guardado para restauração", token=self.lucas_token)
+        with application.connect() as db:
+            db.execute("UPDATE items SET status='No ponto de guarda' WHERE id=?", (item["id"],))
+        for token in (self.student_token, self.admin_token, third_token):
+            self.request(f"/api/items/{item['id']}/reports", "POST", {"reason": "Denúncia para ocultar o anúncio."}, token=token, expected=201)
+        self.assertEqual(self.item_status(item["id"]), "Oculto")
+        _, queue = self.request("/api/moderation/reports", token=self.mod_token, expected=200)
+        for report in [r for r in queue["reports"] if r["item_id"] == item["id"]]:
+            self.request(f"/api/reports/{report['id']}/decision", "POST", {"decision": "Manter anúncio", "note": "Sem fundamento."}, token=self.mod_token, expected=200)
+        self.assertEqual(self.item_status(item["id"]), "No ponto de guarda")
+        # Itens encerrados não são ocultados nem reabertos por denúncias.
+        resolved = self.create_lost(title="Item resolvido denunciado", token=self.lucas_token)
+        self.request(f"/api/items/{resolved['id']}/resolve", "POST", {}, token=self.lucas_token, expected=200)
+        for token in (self.student_token, self.admin_token, third_token):
+            self.request(f"/api/items/{resolved['id']}/reports", "POST", {"reason": "Denúncia em item resolvido."}, token=token, expected=201)
+        self.assertEqual(self.item_status(resolved["id"]), "Resolvido")
+
+    def test_36_nv03_staff_not_auto_suspended_and_no_self_judging(self):
+        mod2_token, _ = self.new_user("moderador.dois@campus.edu.br", role="Moderador")
+        for n in range(3):
+            item = self.create_lost(title=f"Anúncio da administração {n}", token=self.admin_token)
+            self.request(f"/api/items/{item['id']}/reports", "POST", {"reason": "Conteúdo indevido no anúncio."}, token=self.student_token, expected=201)
+            _, queue = self.request("/api/moderation/reports", token=self.mod_token, expected=200)
+            report = next(r for r in queue["reports"] if r["item_id"] == item["id"])
+            self.request(f"/api/reports/{report['id']}/decision", "POST", {"decision": "Ocultar anúncio", "note": "Procedente para teste."}, token=self.mod_token, expected=200)
+        _, me = self.request("/api/me", token=self.admin_token, expected=200)
+        self.assertEqual(me["user"]["status"], "Ativo")
+        # Moderador não decide denúncia sobre o próprio anúncio.
+        own = self.create_lost(title="Anúncio do moderador", token=self.mod_token)
+        self.request(f"/api/items/{own['id']}/reports", "POST", {"reason": "Denúncia contra o moderador."}, token=self.student_token, expected=201)
+        _, queue = self.request("/api/moderation/reports", token=self.mod_token, expected=200)
+        report = next(r for r in queue["reports"] if r["item_id"] == own["id"])
+        self.request(f"/api/reports/{report['id']}/decision", "POST", {"decision": "Manter anúncio", "note": "Decidindo em causa própria."}, token=self.mod_token, expected=403)
+        self.request(f"/api/reports/{report['id']}/decision", "POST", {"decision": "Manter anúncio", "note": "Revisado por outra pessoa."}, token=mod2_token, expected=200)
+
+    def test_37_nv04_v12_hidden_item_blocks_approval_and_return(self):
+        item = self.create_found(title="Achado ocultado depois", token=self.lucas_token)
+        _, pending = self.request(f"/api/items/{item['id']}/claims", "POST", {"answer": "teste azul"}, token=self.student_token, expected=201)
+        with application.connect() as db:
+            db.execute("UPDATE items SET status='Oculto' WHERE id=?", (item["id"],))
+        self.request(f"/api/claims/{pending['claim_id']}/decision", "POST", {"decision": "Aprovada", "note": "ok"}, token=self.lucas_token, expected=409)
+        with application.connect() as db:
+            db.execute("UPDATE items SET status='Aberto' WHERE id=?", (item["id"],))
+        self.request(f"/api/claims/{pending['claim_id']}/decision", "POST", {"decision": "Aprovada", "note": "ok"}, token=self.lucas_token, expected=200)
+        with application.connect() as db:
+            db.execute("UPDATE items SET status='Oculto' WHERE id=?", (item["id"],))
+        self.request(f"/api/claims/{pending['claim_id']}/returned", "POST", {}, token=self.lucas_token, expected=409)
+        self.assertEqual(self.item_status(item["id"]), "Oculto")
+        with application.connect() as db:
+            db.execute("UPDATE items SET status='Aberto' WHERE id=?", (item["id"],))
+        self.request(f"/api/claims/{pending['claim_id']}/returned", "POST", {}, token=self.lucas_token, expected=200)
+        self.request(f"/api/claims/{pending['claim_id']}/returned", "POST", {}, token=self.lucas_token, expected=409)
+
+    def test_38_v04_nv06_seed_accounts(self):
+        # Uma suspensão sobrevive a um novo init_db no modo demonstração.
+        with application.connect() as db:
+            db.execute("UPDATE users SET status='Suspenso' WHERE email='lucas@campus.edu.br'")
+        try:
+            application.init_db(demo=True)
+            with application.connect() as db:
+                self.assertEqual(db.execute("SELECT status FROM users WHERE email='lucas@campus.edu.br'").fetchone()[0], "Suspenso")
+        finally:
+            with application.connect() as db:
+                db.execute("UPDATE users SET status='Ativo' WHERE email='lucas@campus.edu.br'")
+        # Fora do modo demonstração: banco novo sem contas públicas e senhas públicas trocadas.
+        original = application.DB_PATH
+        try:
+            application.DB_PATH = application.DATA_DIR / "fora-do-demo.sqlite3"
+            with patch("builtins.print") as printed:
+                application.init_db(demo=False)
+            with application.connect() as db:
+                emails = {r[0] for r in db.execute("SELECT email FROM users").fetchall()}
+                self.assertEqual(emails, {"admin@campus.edu.br"})
+                self.assertEqual(db.execute("SELECT COUNT(*) FROM items").fetchone()[0], 0)
+            self.assertTrue(any("senha" in str(c) for c in printed.call_args_list))
+            application.DB_PATH = application.DATA_DIR / "demo-depois.sqlite3"
+            application.init_db(demo=True)
+            with patch("builtins.print"):
+                application.init_db(demo=False)
+            with application.connect() as db:
+                row = db.execute("SELECT salt,password_hash,password_iterations FROM users WHERE email='admin@campus.edu.br'").fetchone()
+            _, digest = application.hash_password("Admin@12345", row["salt"], row["password_iterations"])
+            self.assertNotEqual(digest, row["password_hash"])
+        finally:
+            application.DB_PATH = original
+
+    def test_39_nv07_unknown_host_is_rejected(self):
+        _, data = self.request("/api/items", headers={"Host": "rebind.attacker.example:8000"}, expected=421)
+        self.assertIn("Host", data["error"])
+        self.request("/api/login", "POST", {"email": "admin@campus.edu.br", "password": "Admin@12345"}, headers={"Host": "rebind.attacker.example"}, expected=421)
+
+    def test_40_nv08_v06_login_limits_and_bounded_keys(self):
+        huge = "x" * 10000 + "@campus.edu.br"
+        for _ in range(3):
+            self.request("/api/login", "POST", {"email": huge, "password": "errada"}, expected=401)
+        self.assertTrue(all(len(str(k)) < 400 for k in application.RATE_LIMITS))
+        for _ in range(8):
+            self.request("/api/login", "POST", {"email": "estudante@campus.edu.br", "password": "errada"}, expected=401)
+        self.request("/api/login", "POST", {"email": "estudante@campus.edu.br", "password": "Estudante@12345"}, expected=429)
+        application.RATE_LIMITS.clear()
+        # Bloqueio por conta, independente do IP: 10 erros em 15 minutos.
+        for _ in range(10):
+            application.rate_hit(("login-fail", "estudante@campus.edu.br"), 10**6, 900)
+        self.request("/api/login", "POST", {"email": "estudante@campus.edu.br", "password": "Estudante@12345"}, expected=429)
+        application.RATE_LIMITS.clear()
+        _, data = self.request("/api/register", "POST", {"name": "Senha Comum", "email": "senha.comum@campus.edu.br", "password": "12345678", "password_confirmation": "12345678"}, expected=400)
+        self.assertIn("comum", data["error"])
+
+    def test_41_v06_legacy_hash_is_upgraded_on_login(self):
+        salt, digest = application.hash_password("Legado@2024", iterations=application.LEGACY_PBKDF2_ITERATIONS)
+        with application.connect() as db:
+            db.execute("INSERT INTO users(name,email,role,salt,password_hash,password_iterations,created_at,status,email_verified) VALUES('Conta Legada','legado@campus.edu.br','Estudante',?,?,?,?,'Ativo',1)",
+                       (salt, digest, application.LEGACY_PBKDF2_ITERATIONS, application.now()))
+        self.login("legado@campus.edu.br", "Legado@2024")
+        with application.connect() as db:
+            self.assertEqual(db.execute("SELECT password_iterations FROM users WHERE email='legado@campus.edu.br'").fetchone()[0], application.PBKDF2_ITERATIONS)
+        self.login("legado@campus.edu.br", "Legado@2024")
+
+    def test_42_nv09_v09_photo_edit_validates_before_writing(self):
+        item = self.create_found(title="Achado com edição de fotos", token=self.lucas_token)
+        before = set(application.UPLOAD_DIR.iterdir())
+        bad = {"mime": "image/png", "data": "data:image/png;base64," + base64.b64encode(b"nao e png").decode()}
+        self.request(f"/api/items/{item['id']}", "PATCH", {"photos": [self.image(), bad]}, token=self.lucas_token, expected=400)
+        self.request(f"/api/items/{item['id']}", "PATCH", {"photos": [self.image()], "location": "Local inexistente"}, token=self.lucas_token, expected=400)
+        self.request(f"/api/items/{item['id']}", "PATCH", {"photos": ["texto"]}, token=self.lucas_token, expected=400)
+        self.assertEqual(set(application.UPLOAD_DIR.iterdir()), before)
+        self.request(f"/api/items/{item['id']}", "PATCH", {"photos": [self.image()]}, token=self.lucas_token, expected=200)
+
+    def test_43_v10_image_metadata_is_removed(self):
+        exif = b"Exif\x00\x00GPS-LATITUDE-SECRETA"
+        jpeg = (b"\xff\xd8" + b"\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+                + b"\xff\xe1" + (len(exif) + 2).to_bytes(2, "big") + exif
+                + b"\xff\xfe\x00\x0ccomentario" + b"\xff\xda\x00\x08\x01\x01\x00\x00\x3f\x00" + b"\x12\x34" + b"\xff\xd9")
+        clean = application.strip_jpeg_metadata(jpeg)
+        self.assertNotIn(b"GPS-LATITUDE", clean)
+        self.assertNotIn(b"comentario", clean)
+        self.assertIn(b"JFIF", clean)
+        png = (application.UPLOAD_DIR / "demo-bottle.png").read_bytes()
+        text_chunk = b"tEXt" + b"Author\x00Fulano"
+        crc = application.zlib.crc32(text_chunk).to_bytes(4, "big")
+        tagged = png[:33] + (len(text_chunk) - 4).to_bytes(4, "big") + text_chunk + crc + png[33:]
+        self.assertNotIn(b"Fulano", application.strip_png_metadata(tagged))
+        vp8x = b"VP8X" + (10).to_bytes(4, "little") + bytes([0x08]) + b"\x00" * 9
+        exif_chunk = b"EXIF" + (4).to_bytes(4, "little") + b"GPS!"
+        body = b"WEBP" + vp8x + exif_chunk
+        webp = application.strip_webp_metadata(b"RIFF" + len(body).to_bytes(4, "little") + body)
+        self.assertNotIn(b"GPS!", webp)
+        self.assertEqual(int.from_bytes(webp[4:8], "little"), len(webp) - 8)
+        self.assertEqual(webp[20] & 0x08, 0)
+        # Pela API: a foto publicada não contém os metadados.
+        _, result = self.request("/api/items", "POST", {
+            "title": "Achado com EXIF", "type": "Achado", "category": "Garrafas",
+            "description": "Foto com metadados de localização.", "location": "Biblioteca central",
+            "event_date": date.today().isoformat(),
+            "photos": [{"mime": "image/jpeg", "data": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()}],
+            "verification_question": "Qual detalhe está gravado?", "verification_answer": "teste"
+        }, token=self.lucas_token, expected=201)
+        saved = (application.UPLOAD_DIR / Path(result["item"]["photos"][0]).name).read_bytes()
+        self.assertNotIn(b"GPS-LATITUDE", saved)
+
+    def test_44_v11_verification_token_stored_hashed(self):
+        _, created = self.request("/api/register", "POST", {"name": "Token Hash", "email": "token.hash@campus.edu.br", "password": "Senha12345", "password_confirmation": "Senha12345"}, expected=201)
+        raw = urllib.parse.parse_qs(urllib.parse.urlparse(created["verification_url"]).query)["token"][0]
+        with application.connect() as db:
+            stored = db.execute("SELECT verification_token FROM users WHERE email='token.hash@campus.edu.br'").fetchone()[0]
+        self.assertNotEqual(stored, raw)
+        self.assertEqual(stored, application.token_digest(raw))
+
+    def test_45_v05_v13_headers_cookie_and_csrf(self):
+        _, _, headers = self.request("/", with_headers=True, expected=200)
+        self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
+        self.assertEqual(headers["X-Frame-Options"], "DENY")
+        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
+        self.assertNotIn("Python", headers["Server"])
+        _, login, headers = self.request("/api/login", "POST", {"email": "lucas@campus.edu.br", "password": "Lucas@12345"}, with_headers=True, expected=200)
+        cookie = headers["Set-Cookie"]
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=Strict", cookie)
+        session = cookie.split(";", 1)[0]
+        self.request("/api/me", headers={"Cookie": session}, expected=200)
+        # Com cookie, POST sem o cabeçalho do frontend é recusado (CSRF).
+        self.request("/api/notifications/read-all", "POST", {}, headers={"Cookie": session}, expected=403)
+        self.request("/api/notifications/read-all", "POST", {}, headers={"Cookie": session, "X-Encontrei": "1"}, expected=200)
+        self.request("/api/logout", "POST", {}, headers={"Cookie": session, "X-Encontrei": "1"}, expected=200)
+        self.request("/api/me", headers={"Cookie": session}, expected=401)
+
+    def test_46_v15_smtp_login_requires_encryption(self):
+        smtp_env = {"ENCONTREI_SMTP_HOST": "smtp.example.test", "ENCONTREI_SMTP_USER": "mailer@example.test",
+                    "ENCONTREI_SMTP_PASSWORD": "fake-test-password", "ENCONTREI_SMTP_TLS": "false", "ENCONTREI_SMTP_SSL": "false"}
+        with patch.dict(os.environ, smtp_env), patch.object(application.smtplib, "SMTP") as smtp_factory, patch("builtins.print"):
+            sent = application.send_email("aluno@campus.edu.br", "Assunto", "Corpo")
+        self.assertFalse(sent)
+        smtp_factory.assert_not_called()
+
+    def test_47_v07_session_idle_timeout_and_body_limit(self):
+        token = self.login("lucas@campus.edu.br", "Lucas@12345")["token"]
+        uid, expires, _ = application.TOKENS[token]
+        application.TOKENS[token] = (uid, expires, application.time.time() - application.SESSION_IDLE - 1)
+        self.request("/api/me", token=token, expected=401)
+        req = urllib.request.Request(self.base_url + "/api/login", data=b"{" + b" " * (application.MAX_SMALL_BODY + 10) + b"}",
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            urllib.request.urlopen(req, timeout=8)
+            self.fail("Era esperado 413")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 413)
+        except (ConnectionError, urllib.error.URLError):
+            pass  # o servidor pode fechar a conexão antes de ler o corpo inteiro
 
 
 if __name__ == "__main__":

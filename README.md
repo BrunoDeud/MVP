@@ -57,7 +57,7 @@ No Windows, instale o Python em https://www.python.org/downloads/windows/ e marq
 ### Windows (recomendado para apresentação)
 
 1. Extraia o ZIP completo para uma pasta local.
-2. Dê dois cliques em `executar.bat`.
+2. Para **apresentar** com as contas fictícias, dê dois cliques em `executar-demo.bat` (modo demonstração). Para uso normal, use `executar.bat`.
 3. O script tenta localizar `python` e, em seguida, `py`; o servidor inicia em `http://127.0.0.1:8000` e tenta abrir o navegador automaticamente.
 4. Mantenha o terminal aberto durante a apresentação. Use `Ctrl+C` nessa janela para encerrar.
 
@@ -66,7 +66,8 @@ No Windows, instale o Python em https://www.python.org/downloads/windows/ e marq
 Na pasta do projeto, execute:
 
 ```bash
-python app.py
+python app.py          # modo normal
+python app.py --demo   # modo demonstração (contas fictícias com senhas públicas)
 ```
 
 Se sua instalação usa `python3`:
@@ -79,13 +80,17 @@ Abra http://127.0.0.1:8000. Se a porta 8000 estiver ocupada, encerre o outro pro
 
 ### Verificação rápida
 
-Com o servidor ligado, acesse http://127.0.0.1:8000/api/health. Uma resposta saudável contém `"ok": true` e `"database": "SQLite"`.
+Com o servidor ligado, acesse http://127.0.0.1:8000/api/health. Uma resposta saudável contém `"ok": true`.
 
 ## 7. Variáveis de ambiente
 
 Esta versão não exige arquivo `.env` nem variáveis de ambiente para iniciar. O endereço local é definido pelas constantes `HOST` e `PORT` em `app.py` (padrões `127.0.0.1` e `8000`). A configuração de e-mail institucional (domínios permitidos) é feita pelo catálogo de domínios, acessível pelo administrador.
 
-O cadastro cria uma URL de verificação válida por 24 horas. Sem SMTP, a URL é devolvida pela interface para abrir manualmente em modo local. O envio real de verificação e de notificações pode ser habilitado opcionalmente pelas variáveis SMTP abaixo; credenciais nunca devem ser gravadas no código ou versionadas no Git.
+O cadastro cria uma URL de verificação válida por 24 horas e a envia por e-mail. A URL **não** é devolvida pela API: sem SMTP configurado, ela aparece apenas no terminal do servidor (para quem opera a máquina). No modo demonstração (`--demo`), e somente nele, a interface mostra o link na tela.
+
+Outras variáveis opcionais: `ENCONTREI_DEMO=1` (equivale a `--demo`), `ENCONTREI_ADMIN_EMAIL` (e-mail do administrador inicial criado fora do modo demonstração) e `ENCONTREI_ALLOWED_HOSTS` (nomes de host extras aceitos, separados por vírgula; por padrão só `127.0.0.1`, `localhost` e `[::1]` na porta 8000).
+
+O arquivo `data/secret.key` é criado na primeira execução e protege as respostas de verificação guardadas no banco. Não o versione nem o apague: sem ele, as respostas dos anúncios existentes deixam de ser reconhecidas. O envio real de verificação e de notificações pode ser habilitado opcionalmente pelas variáveis SMTP abaixo; credenciais nunca devem ser gravadas no código ou versionadas no Git.
 
 ### SMTP opcional (somente se houver provedor e credenciais)
 
@@ -109,16 +114,18 @@ Quando essas variáveis não estiverem definidas, a aplicação continua funcion
 
 - Banco: SQLite;
 - Arquivo: `data/encontrei.sqlite3`;
-- Criação do schema, índices, catálogo e contas de demonstração: automática na inicialização (`init_db()` em `app.py`);
+- Criação do schema, índices e catálogo: automática na inicialização (`init_db()` em `app.py`). Contas e anúncios fictícios só são criados no modo demonstração;
 - Integridade: chaves primárias, chaves estrangeiras com `PRAGMA foreign_keys=ON`, restrições `CHECK`, valores únicos e índices;
 - Imagens: arquivos no diretório `uploads/`; o banco guarda seus caminhos;
 - Persistência: os dados permanecem após fechar/reabrir o servidor.
 
-Para reiniciar a demonstração do zero, encerre o servidor e exclua `data/encontrei.sqlite3`. Na inicialização seguinte, o banco e os dados fictícios serão recriados. Para eliminar imagens enviadas, exclua os arquivos em `uploads/`, preservando imagens `demo-*.png` se desejar manter as imagens iniciais.
+Para reiniciar a demonstração do zero, encerre o servidor e exclua `data/encontrei.sqlite3`. Na inicialização seguinte com `executar-demo.bat`, o banco e os dados fictícios serão recriados. Para eliminar imagens enviadas, exclua os arquivos em `uploads/`, preservando imagens `demo-*.png` se desejar manter as imagens iniciais.
 
 O esquema efetivo está documentado em [`docs/Modelagem-de-dados/der.md`](docs/Modelagem-de-dados/der.md).
 
 ## 9. Contas iniciais para demonstração
+
+Estas contas existem **somente no modo demonstração** (`executar-demo.bat` ou `python app.py --demo`).
 
 | Perfil | E-mail | Senha |
 |---|---|---|
@@ -128,6 +135,11 @@ O esquema efetivo está documentado em [`docs/Modelagem-de-dados/der.md`](docs/M
 | Administrador | `admin@campus.edu.br` | `Admin@12345` |
 
 São contas totalmente fictícias para teste local. Não reutilize as credenciais em nenhum ambiente público ou com dados reais.
+
+**Fora do modo demonstração:**
+- Num banco novo, é criado apenas um administrador (`admin@campus.edu.br`, ou o e-mail de `ENCONTREI_ADMIN_EMAIL`) com senha aleatória, exibida **uma única vez** no terminal.
+- Num banco que já tinha as contas acima, as senhas públicas são trocadas por senhas aleatórias, também exibidas uma vez no terminal.
+- Ao voltar ao modo demonstração, as senhas públicas são restauradas. Uma conta suspensa continua suspensa.
 
 ## 10. Funcionalidades do MVP
 
@@ -165,7 +177,7 @@ A API local usa `http://127.0.0.1:8000/api`. Salvo as rotas públicas, as requis
 
 ## 13. Testes
 
-A suíte contém **31 testes automatizados de integração HTTP e manutenção**. Usa apenas `unittest`, `urllib` e banco temporário. Ela sobe um servidor HTTP isolado e testa a API, as validações, autorização, persistência e regras de negócio.
+A suíte contém **47 testes automatizados de integração HTTP e manutenção**. Usa apenas `unittest`, `urllib` e banco temporário. Ela sobe um servidor HTTP isolado e testa a API, as validações, autorização, persistência e regras de negócio.
 
 ```bash
 python -m unittest -v test_app.py
@@ -187,6 +199,6 @@ Os testes não modificam o banco de demonstração: criam um banco temporário. 
 
 ## 15. Limitações conhecidas e segurança
 
-Este projeto é um MVP acadêmico local. O servidor da biblioteca padrão não é um servidor de produção e está vinculado a `127.0.0.1` por padrão. Sessões em token ficam em memória e terminam quando o servidor é encerrado. Redefinição de senha, autenticação institucional externa, implantação pública, backup/retention operacional e teste de carga não fazem parte desta configuração local. O envio de e-mail somente funciona se um servidor SMTP externo válido for configurado. A verificação de e-mail é real dentro da lógica da aplicação (conta pendente/ativa e token com expiração); sem SMTP o link deve ser aberto manualmente.
+Este projeto é um MVP acadêmico local. O servidor da biblioteca padrão não é um servidor de produção e está vinculado a `127.0.0.1` por padrão. Sessões ficam em memória e terminam quando o servidor é encerrado. O navegador usa um cookie `HttpOnly; SameSite=Strict`. As sessões expiram após 12 h, ou após 2 h sem uso. As correções de segurança aplicadas estão em [`docs/seguranca/correcoes.md`](docs/seguranca/correcoes.md). Redefinição de senha, autenticação institucional externa, implantação pública, backup/retention operacional e teste de carga não fazem parte desta configuração local. O envio de e-mail somente funciona se um servidor SMTP externo válido for configurado. A verificação de e-mail é real dentro da lógica da aplicação (conta pendente/ativa e token com expiração); sem SMTP o link deve ser aberto manualmente.
 
 O projeto contém usuários e dados fictícios. Não o exponha diretamente à internet e não use dados pessoais reais. Para produção seriam necessários, no mínimo, servidor WSGI adequado, HTTPS, gestão segura de segredos, envio de e-mail configurado, sessões persistentes/seguras, política de backup e hardening adicional.

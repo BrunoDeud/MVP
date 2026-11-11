@@ -1,0 +1,65 @@
+{
+ "run_id": "MVP-run-1",
+ "repo": "MVP",
+ "target": "D:/MVP",
+ "source_ref": {
+  "commit": "ef131bb479d9c25a2ac448f9dd3218f888e5a514",
+  "worktree_dirty": true,
+  "dirty_paths": [
+   ".gitignore",
+   ".claude/",
+   "docs/seguranca/"
+  ],
+  "note": "Dirty paths are non-target files (gitignore line, installed skill, prior manual report); reviewed target source app.py, index.html, test_app.py equals the commit."
+ },
+ "profile": "quick",
+ "scope_paths": [
+  "app.py",
+  "index.html",
+  "test_app.py",
+  "executar.bat",
+  ".gitignore",
+  "docs/api"
+ ],
+ "budget": 20,
+ "budget_plan": {
+  "reconnaissance": 4,
+  "hunters_wave_1": 6,
+  "final_critic": 1,
+  "validation_reserve": 9
+ },
+ "execution_policy": "sandboxed-source-and-local-only",
+ "host_capabilities": {
+  "os_sandbox": false,
+  "no_follow_promotion": false,
+  "validators_runnable": false,
+  "notes": "Windows 11 host without WSL/Docker; Node fs.constants.O_NOFOLLOW unavailable so validate-*.cjs refuse input and artifact promotion cannot be enforced. No target-controlled code is executed in this run."
+ },
+ "selected_companion_files": [
+  "WEB-PROTOCOL-AND-AUTH.md",
+  "CLIENT-SIDE.md",
+  "RESOURCE-EXHAUSTION-AND-AVAILABILITY.md"
+ ],
+ "prior_runs": [],
+ "prior_run_note": "No prior coverage-ledger.json or findings.json exist. A manual report docs/seguranca/relatorio-vulnerabilidades.md exists in the worktree but is not a compatible ledger and is not used as evidence or hunter exemplar.",
+ "shared_file_owners": {
+  "run-metadata.json": "parent",
+  "architecture.md": "parent",
+  "coverage-ledger.json": "parent",
+  "findings.json": "parent",
+  "REPORT.md": "parent",
+  "FINDINGS-DETAIL.md": "parent",
+  "NEEDS-VALIDATION.md": "parent"
+ },
+ "run_status": "incomplete",
+ "budget_note": "Budget raised from 18 to 19 by the parent (not user-set) to re-run one malformed hunter result. Raised again to 20 (parent-proposed, not user-set) so each of the 9 unique candidates gets one fresh verifier.",
+ "incomplete_reason": "validators_unavailable_on_host",
+ "incomplete_detail": "validate-findings.cjs and validate-coverage-ledger.cjs refuse input on this Windows host (fs.constants.O_NOFOLLOW unavailable), so the Phase 4 validator gate cannot pass. Parent-side structural checks of findings.json were run instead; they do not replace the validators. No target code was executed (no OS sandbox), so no record can be confirmed.",
+ "agents_spent": {
+  "reconnaissance": 4,
+  "hunters": 6,
+  "final_critic": 1,
+  "verifiers": 9,
+  "total": 20
+ }
+}

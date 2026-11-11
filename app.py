@@ -17,6 +17,7 @@ import smtplib
 import ssl
 import sqlite3
 import struct
+import sys
 import threading
 import time
 import webbrowser
@@ -29,12 +30,41 @@ UPLOAD_DIR = ROOT / "uploads"
 DB_PATH = DATA_DIR / "encontrei.sqlite3"
 WEB_PATH = ROOT / "index.html"
 HOST, PORT = "127.0.0.1", 8000
-MAX_BODY = 24 * 1024 * 1024
+MAX_BODY = 24 * 1024 * 1024        # somente rotas autenticadas que recebem fotos
+MAX_SMALL_BODY = 64 * 1024         # demais rotas (inclui as não autenticadas)
 MAX_PHOTO = 5 * 1024 * 1024
+MAX_THREADS = 64                   # conexões simultâneas atendidas
+REQUEST_TIMEOUT = 20               # segundos de inatividade por conexão (slowloris)
 DB_LOCK = threading.RLock()
-TOKENS = {}  # token -> (user_id, expires_epoch)
-LOGIN_ATTEMPTS = {}  # client/email -> [epoch timestamps]
+TOKENS = {}  # token -> (user_id, expires_epoch, last_seen_epoch)
+SESSION_TTL = 12 * 60 * 60
+SESSION_IDLE = 2 * 60 * 60
+MAX_SESSIONS_PER_USER = 5
+RATE_LIMITS = {}  # chave -> [epoch timestamps]
+LOGIN_ATTEMPTS = RATE_LIMITS  # nome antigo mantido por compatibilidade
 LAST_MAINTENANCE = 0
+PBKDF2_ITERATIONS = 600_000
+LEGACY_PBKDF2_ITERATIONS = 120_000
+CLAIM_MAX_FAILURES_PER_USER = 3    # por usuário e item, em 24 h
+CLAIM_MAX_FAILURES_PER_ITEM = 10   # por item, somando todos os usuários, em 24 h
+REPORT_MIN_ACCOUNT_AGE_HOURS = 24  # denúncias de contas novas não ocultam anúncios sozinhas
+MAX_OPEN_ITEMS = 10
+MAX_ITEMS_PER_DAY = 5
+# Modo demonstração: cria contas/dados fictícios com senhas públicas e devolve o link de
+# verificação na resposta quando não há SMTP. Só é ativado explicitamente.
+DEMO_MODE = "--demo" in sys.argv or os.environ.get("ENCONTREI_DEMO", "").strip().lower() in ("1", "true", "yes", "sim")
+EXTRA_ALLOWED_HOSTS = {h.strip().lower() for h in os.environ.get("ENCONTREI_ALLOWED_HOSTS", "").split(",") if h.strip()}
+DEMO_USERS = [
+    ("Ana Souza", "estudante@campus.edu.br", "Estudante", "Estudante@12345"),
+    ("Carlos Moderador", "moderador@campus.edu.br", "Moderador", "Moderador@12345"),
+    ("Patrícia Administradora", "admin@campus.edu.br", "Administrador", "Admin@12345"),
+    ("Lucas Pereira", "lucas@campus.edu.br", "Estudante", "Lucas@12345"),
+]
+COMMON_PASSWORDS = {
+    "12345678", "123456789", "1234567890", "87654321", "11111111", "00000000", "password", "password1",
+    "password123", "qwerty123", "qwertyuiop", "senha123", "senha1234", "abc12345", "abcd1234", "iloveyou",
+    "admin123", "admin1234", "mudar123", "encontrei", "encontrei123", "estudante", "campus123",
+}
 
 DATA_DIR.mkdir(exist_ok=True)
 UPLOAD_DIR.mkdir(exist_ok=True)
@@ -67,10 +97,281 @@ def valid_date(value, field="data"):
     return parsed.isoformat()
 
 
-def hash_password(password, salt=None):
+def hash_password(password, salt=None, iterations=None):
     salt = salt or secrets.token_hex(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 120_000).hex()
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), iterations or PBKDF2_ITERATIONS).hex()
     return salt, digest
+
+
+def password_problem(password, email=""):
+    """Política mínima de senha: tamanho, lista de senhas comuns e parte local do e-mail."""
+    if len(password) < 8 or len(password) > 128:
+        return "A senha deve ter entre 8 e 128 caracteres."
+    lowered = password.casefold()
+    if lowered in COMMON_PASSWORDS or len(set(password)) < 4:
+        return "Essa senha é muito comum ou fácil de adivinhar. Escolha outra."
+    local = email.split("@", 1)[0].casefold()
+    if len(local) >= 4 and local in lowered:
+        return "A senha não pode conter o seu e-mail."
+    return None
+
+
+_SECRET_KEYS = {}
+
+
+def server_secret():
+    """Chave local do servidor (data/secret.key), criada na primeira execução."""
+    path = DATA_DIR / "secret.key"
+    key = _SECRET_KEYS.get(path)
+    if key:
+        return key
+    with DB_LOCK:
+        if path.is_file() and len(path.read_bytes()) >= 32:
+            key = path.read_bytes()
+        else:
+            key = secrets.token_bytes(32)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(key)
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
+        _SECRET_KEYS[path] = key
+    return key
+
+
+def answer_digest(answer):
+    """HMAC da resposta normalizada; a resposta em texto puro não é guardada."""
+    return "hmac$" + hmac.new(server_secret(), norm(answer).encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def answer_matches(stored, answer):
+    if not stored:
+        return False
+    if stored.startswith("hmac$"):
+        return hmac.compare_digest(stored, answer_digest(answer))
+    return hmac.compare_digest(norm(stored).encode("utf-8"), norm(answer).encode("utf-8"))
+
+
+def token_digest(token):
+    return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
+def rate_hit(key, limit, window, record=True):
+    """Janela deslizante em memória. Devolve False quando o limite já foi atingido."""
+    current = time.time()
+    with DB_LOCK:
+        if len(RATE_LIMITS) > 5000:
+            prune_rate_limits()
+        hits = [t for t in RATE_LIMITS.get(key, []) if current - t < window]
+        if len(hits) >= limit:
+            RATE_LIMITS[key] = hits
+            return False
+        if record:
+            hits.append(current)
+        if hits:
+            RATE_LIMITS[key] = hits
+        else:
+            RATE_LIMITS.pop(key, None)
+        return True
+
+
+def rate_count(key, window):
+    current = time.time()
+    with DB_LOCK:
+        return len([t for t in RATE_LIMITS.get(key, []) if current - t < window])
+
+
+def prune_rate_limits(max_window=24 * 60 * 60):
+    current = time.time()
+    with DB_LOCK:
+        for key in list(RATE_LIMITS):
+            hits = [t for t in RATE_LIMITS[key] if current - t < max_window]
+            if hits:
+                RATE_LIMITS[key] = hits
+            else:
+                RATE_LIMITS.pop(key, None)
+
+
+def create_session(user_id):
+    """Cria token com expiração absoluta e por inatividade, limitando sessões por usuário."""
+    current = time.time()
+    token = secrets.token_urlsafe(32)
+    with DB_LOCK:
+        mine = sorted(((k, v) for k, v in TOKENS.items() if v[0] == user_id), key=lambda kv: kv[1][2])
+        while len(mine) >= MAX_SESSIONS_PER_USER:
+            TOKENS.pop(mine.pop(0)[0], None)
+        TOKENS[token] = (user_id, current + SESSION_TTL, current)
+    return token
+
+
+def revoke_user_sessions(user_id):
+    with DB_LOCK:
+        for key, val in list(TOKENS.items()):
+            if val[0] == user_id:
+                TOKENS.pop(key, None)
+
+
+def prune_sessions():
+    current = time.time()
+    with DB_LOCK:
+        for key, val in list(TOKENS.items()):
+            last_seen = val[2] if len(val) > 2 else current
+            if val[1] < current or current - last_seen > SESSION_IDLE:
+                TOKENS.pop(key, None)
+
+
+def like_pattern(value):
+    return "%" + value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+class InvalidImage(Exception):
+    pass
+
+
+def strip_jpeg_metadata(data):
+    """Remove segmentos APP1 (EXIF/XMP), APP13 (IPTC), comentários e APPn não essenciais."""
+    if not data.startswith(b"\xff\xd8"):
+        raise InvalidImage()
+    out = bytearray(b"\xff\xd8")
+    i, n = 2, len(data)
+    while i < n:
+        if data[i] != 0xFF:
+            raise InvalidImage()
+        while i < n and data[i] == 0xFF:
+            i += 1
+        if i >= n:
+            raise InvalidImage()
+        marker = data[i]
+        i += 1
+        if marker == 0xD9:  # EOI
+            out += b"\xff\xd9"
+            return bytes(out)
+        if marker == 0xDA:  # SOS: o restante é dado comprimido
+            out += b"\xff\xda" + data[i:]
+            return bytes(out)
+        if 0xD0 <= marker <= 0xD7 or marker == 0x01:
+            out += bytes((0xFF, marker))
+            continue
+        if i + 2 > n:
+            raise InvalidImage()
+        length = int.from_bytes(data[i:i + 2], "big")
+        if length < 2 or i + length > n:
+            raise InvalidImage()
+        segment = data[i:i + length]
+        i += length
+        keep = marker in (0xE0, 0xE2, 0xEE) or not (0xE0 <= marker <= 0xEF or marker == 0xFE)
+        if keep:
+            out += bytes((0xFF, marker)) + segment
+    raise InvalidImage()
+
+
+def strip_png_metadata(data):
+    """Remove blocos eXIf, tEXt, iTXt, zTXt e tIME."""
+    signature = b"\x89PNG\r\n\x1a\n"
+    if not data.startswith(signature):
+        raise InvalidImage()
+    out = bytearray(signature)
+    i, n = len(signature), len(data)
+    while i < n:
+        if i + 12 > n:
+            raise InvalidImage()
+        length = int.from_bytes(data[i:i + 4], "big")
+        kind = data[i + 4:i + 8]
+        end = i + 12 + length
+        if end > n:
+            raise InvalidImage()
+        if kind not in (b"eXIf", b"tEXt", b"iTXt", b"zTXt", b"tIME"):
+            out += data[i:end]
+        i = end
+        if kind == b"IEND":
+            return bytes(out)
+    raise InvalidImage()
+
+
+def strip_webp_metadata(data):
+    """Remove blocos EXIF e XMP do contêiner RIFF/WEBP e ajusta as flags do VP8X."""
+    if len(data) < 12 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        raise InvalidImage()
+    chunks = []
+    i, n = 12, len(data)
+    while i < n:
+        if i + 8 > n:
+            raise InvalidImage()
+        kind = data[i:i + 4]
+        size = int.from_bytes(data[i + 4:i + 8], "little")
+        end = i + 8 + size + (size & 1)
+        if i + 8 + size > n:
+            raise InvalidImage()
+        body = bytearray(data[i + 8:i + 8 + size])
+        i = min(end, n)
+        if kind in (b"EXIF", b"XMP "):
+            continue
+        if kind == b"VP8X" and body:
+            body[0] &= ~0x0C & 0xFF  # limpa as flags de EXIF (0x08) e XMP (0x04)
+        chunk = kind + len(body).to_bytes(4, "little") + bytes(body)
+        if len(body) & 1:
+            chunk += b"\x00"
+        chunks.append(chunk)
+    payload = b"WEBP" + b"".join(chunks)
+    return b"RIFF" + len(payload).to_bytes(4, "little") + payload
+
+
+def prepare_photos(photos, empty_message="Você pode enviar no máximo 3 fotos."):
+    """Valida todas as fotos antes de gravar qualquer arquivo e remove metadados (EXIF/GPS)."""
+    if not isinstance(photos, list) or len(photos) > 3:
+        raise APIError(400, empty_message)
+    prepared = []
+    for image in photos:
+        if not isinstance(image, dict):
+            raise APIError(400, "Formato de foto inválido.")
+        mime = image.get("mime", ""); raw = image.get("data", "")
+        if mime not in ("image/jpeg", "image/png", "image/webp"):
+            raise APIError(400, "Use fotos JPG, PNG ou WEBP.")
+        if not isinstance(raw, str) or "," not in raw:
+            raise APIError(400, "Uma foto enviada está inválida.")
+        try:
+            binary = base64.b64decode(raw.split(",", 1)[1], validate=True)
+        except Exception:
+            raise APIError(400, "Uma foto enviada está inválida.")
+        if not binary or len(binary) > MAX_PHOTO:
+            raise APIError(400, "Cada foto deve ter conteúdo e no máximo 5 MB.")
+        signatures = {"image/jpeg": binary.startswith(b"\xff\xd8\xff"),
+                      "image/png": binary.startswith(b"\x89PNG\r\n\x1a\n"),
+                      "image/webp": len(binary) >= 12 and binary[:4] == b"RIFF" and binary[8:12] == b"WEBP"}
+        if not signatures[mime]:
+            raise APIError(400, "O conteúdo da foto não corresponde ao formato informado.")
+        strip = {"image/jpeg": strip_jpeg_metadata, "image/png": strip_png_metadata, "image/webp": strip_webp_metadata}[mime]
+        try:
+            binary = strip(binary)
+        except InvalidImage:
+            raise APIError(400, "Uma foto enviada está corrompida ou em formato não suportado.")
+        prepared.append((mime, binary))
+    return prepared
+
+
+def store_photos(prepared):
+    """Grava fotos já validadas; devolve (urls, caminhos) para eventual limpeza."""
+    urls, paths = [], []
+    try:
+        for mime, binary in prepared:
+            ext = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}[mime]
+            path = UPLOAD_DIR / (secrets.token_hex(16) + ext)
+            path.write_bytes(binary)
+            paths.append(path)
+            urls.append("/uploads/" + path.name)
+    except Exception:
+        remove_files(paths)
+        raise
+    return urls, paths
+
+
+def remove_files(paths):
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 @contextmanager
@@ -141,8 +442,9 @@ def create_demo_png(path, kind="bottle"):
     path.write_bytes(data)
 
 
-def init_db():
-    """Cria esquema, índices, catálogos e contas/dados fictícios idempotentemente."""
+def init_db(demo=None):
+    """Cria esquema, índices e catálogos; contas/dados fictícios só no modo demonstração."""
+    demo = DEMO_MODE if demo is None else demo
     with DB_LOCK, connect() as db:
         db.executescript("""
         CREATE TABLE IF NOT EXISTS users (
@@ -278,6 +580,14 @@ def init_db():
             note TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS claim_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id INTEGER NOT NULL REFERENCES items(id),
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            success INTEGER NOT NULL DEFAULT 0 CHECK(success IN (0,1)),
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_claim_attempts_item_date ON claim_attempts(item_id,created_at);
         CREATE INDEX IF NOT EXISTS idx_items_status_type_date ON items(status,type,event_date);
         CREATE INDEX IF NOT EXISTS idx_items_owner_status ON items(owner_id,status);
         CREATE INDEX IF NOT EXISTS idx_claims_status_date ON claims(status,created_at);
@@ -297,6 +607,8 @@ def init_db():
             ("users", "verification_token", "TEXT"),
             ("users", "verification_expires_at", "TEXT"),
             ("users", "email_notifications", "INTEGER NOT NULL DEFAULT 0"),
+            ("users", "password_iterations", f"INTEGER NOT NULL DEFAULT {LEGACY_PBKDF2_ITERATIONS}"),
+            ("items", "status_before_hide", "TEXT"),
             ("items", "category_id", "INTEGER REFERENCES categories(id)"),
             ("items", "location_id", "INTEGER REFERENCES locations(id)"),
             ("items", "guard_point_id", "INTEGER REFERENCES guard_points(id)"),
@@ -327,20 +639,52 @@ def init_db():
                             ("Cantina", "Cantina"), ("Sala 204 — Bloco A", "Bloco A"), ("Portaria principal", "Portaria")]:
             db.execute("INSERT OR IGNORE INTO locations(name,block_name,active,created_at) VALUES(?,?,1,?)", (name, block, now()))
 
-        users = [
-            ("Ana Souza", "estudante@campus.edu.br", "Estudante", "Estudante@12345"),
-            ("Carlos Moderador", "moderador@campus.edu.br", "Moderador", "Moderador@12345"),
-            ("Patrícia Administradora", "admin@campus.edu.br", "Administrador", "Admin@12345"),
-            ("Lucas Pereira", "lucas@campus.edu.br", "Estudante", "Lucas@12345"),
-        ]
-        for name, email, role, pwd in users:
-            row = db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()
-            if not row:
-                salt, digest = hash_password(pwd)
-                db.execute("INSERT INTO users(name,email,role,salt,password_hash,created_at,status,email_verified) VALUES(?,?,?,?,?,?, 'Ativo',1)",
-                           (name, email, role, salt, digest, now()))
+        # Segredos legados em texto puro: token de verificação vira SHA-256 e respostas viram HMAC.
+        for row in db.execute("SELECT id,verification_token FROM users WHERE verification_token IS NOT NULL").fetchall():
+            if not re.fullmatch(r"[0-9a-f]{64}", row["verification_token"]):
+                db.execute("UPDATE users SET verification_token=? WHERE id=?", (token_digest(row["verification_token"]), row["id"]))
+        for row in db.execute("SELECT id,verification_answer FROM items WHERE verification_answer IS NOT NULL AND verification_answer NOT LIKE 'hmac$%'").fetchall():
+            db.execute("UPDATE items SET verification_answer=? WHERE id=?", (answer_digest(row["verification_answer"]), row["id"]))
+        for row in db.execute("SELECT id,answer FROM claims WHERE answer NOT LIKE 'hmac$%'").fetchall():
+            db.execute("UPDATE claims SET answer=? WHERE id=?", (answer_digest(row["answer"]), row["id"]))
+
+        for name, email, role, pwd in DEMO_USERS:
+            row = db.execute("SELECT id,salt,password_hash,password_iterations FROM users WHERE email=?", (email,)).fetchone()
+            if demo:
+                if not row:
+                    salt, digest = hash_password(pwd)
+                    db.execute("INSERT INTO users(name,email,role,salt,password_hash,password_iterations,created_at,status,email_verified) VALUES(?,?,?,?,?,?,?,'Ativo',1)",
+                               (name, email, role, salt, digest, PBKDF2_ITERATIONS, now()))
+                else:
+                    # Contas existentes não são reativadas: uma suspensão continua valendo após reiniciar.
+                    # Só a senha pública é restaurada, caso uma execução sem --demo a tenha trocado.
+                    _, digest = hash_password(pwd, row["salt"], row["password_iterations"])
+                    if not hmac.compare_digest(digest, row["password_hash"]):
+                        salt, digest = hash_password(pwd)
+                        db.execute("UPDATE users SET salt=?,password_hash=?,password_iterations=? WHERE id=?",
+                                   (salt, digest, PBKDF2_ITERATIONS, row["id"]))
+            elif row:
+                _, digest = hash_password(pwd, row["salt"], row["password_iterations"])
+                if hmac.compare_digest(digest, row["password_hash"]):
+                    # Fora do modo demonstração, a senha pública é trocada por uma aleatória.
+                    new_password = secrets.token_urlsafe(12)
+                    salt, new_digest = hash_password(new_password)
+                    db.execute("UPDATE users SET salt=?,password_hash=?,password_iterations=? WHERE id=?",
+                               (salt, new_digest, PBKDF2_ITERATIONS, row["id"]))
+                    print(f"[Segurança] A conta de demonstração {email} usava a senha pública do README. Nova senha: {new_password}")
+
+        if not demo and not db.execute("SELECT 1 FROM users WHERE role='Administrador' AND status='Ativo' AND email_verified=1").fetchone():
+            admin_email = os.environ.get("ENCONTREI_ADMIN_EMAIL", "admin@campus.edu.br").strip().lower()
+            if not db.execute("SELECT 1 FROM users WHERE email=?", (admin_email,)).fetchone():
+                admin_password = secrets.token_urlsafe(12)
+                salt, digest = hash_password(admin_password)
+                db.execute("INSERT INTO users(name,email,role,salt,password_hash,password_iterations,created_at,status,email_verified) VALUES(?,?,'Administrador',?,?,?,?,'Ativo',1)",
+                           ("Administrador", admin_email, salt, digest, PBKDF2_ITERATIONS, now()))
+                print("\n[Segurança] Conta de administrador inicial criada (anote; ela não será exibida novamente):")
+                print(f"            e-mail: {admin_email}")
+                print(f"            senha:  {admin_password}\n")
             else:
-                db.execute("UPDATE users SET status='Ativo',email_verified=1 WHERE email=?", (email,))
+                print(f"[Segurança] Não há administrador ativo e {admin_email} já existe. Defina ENCONTREI_ADMIN_EMAIL com outro e-mail para criar um.")
 
         portaria = db.execute("SELECT id FROM locations WHERE name='Portaria principal'").fetchone()[0]
         guard = db.execute("SELECT id FROM guard_points WHERE name='Guarda da portaria' AND location_id=?", (portaria,)).fetchone()
@@ -367,7 +711,7 @@ def init_db():
                 loc_id = loc[0]
             db.execute("UPDATE items SET category_id=COALESCE(category_id,?),location_id=COALESCE(location_id,?) WHERE id=?", (cat_id, loc_id, row["id"]))
 
-        if db.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 0:
+        if demo and db.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 0:
             student = db.execute("SELECT id FROM users WHERE email='estudante@campus.edu.br'").fetchone()[0]
             lucas = db.execute("SELECT id FROM users WHERE email='lucas@campus.edu.br'").fetchone()[0]
             today = date.today()
@@ -388,7 +732,7 @@ def init_db():
                 db.execute("""INSERT INTO items(title,type,category,category_id,description,location,location_id,event_date,status,owner_id,guard_point_id,
                            verification_question,verification_answer,photos_json,created_at,updated_at)
                            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                           (title, typ, cat, cat_id, desc, loc, loc_id, dt, status, owner, gp, question, norm(answer) if answer else None,
+                           (title, typ, cat, cat_id, desc, loc, loc_id, dt, status, owner, gp, question, answer_digest(answer) if answer else None,
                             json.dumps(photo_urls), now(), now()))
         db.commit()
 
@@ -474,6 +818,10 @@ def send_email(recipient, subject, body):
     message["To"] = recipient
     message["Subject"] = subject[:180]
     message.set_content(body[:6000])
+    if cfg["username"] and not cfg["ssl"] and not cfg["tls"]:
+        # Nunca envia usuário e senha SMTP por uma conexão sem criptografia.
+        print("[SMTP] Login recusado: ative ENCONTREI_SMTP_TLS ou ENCONTREI_SMTP_SSL para enviar credenciais.")
+        return False
     try:
         if cfg["ssl"]:
             with smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=8, context=ssl.create_default_context()) as client:
@@ -567,12 +915,16 @@ def maintenance(force=False):
     global LAST_MAINTENANCE
     if not force and time.time() - LAST_MAINTENANCE < 60:
         return
+    prune_sessions()
+    prune_rate_limits()
     with DB_LOCK, connect() as db:
         stamp = now()
+        db.execute("DELETE FROM claim_attempts WHERE created_at<?", ((datetime.now() - timedelta(days=30)).isoformat(timespec="seconds"),))
         open_cutoff = (datetime.now() - timedelta(days=60)).isoformat(timespec="seconds")
         old_items = db.execute("SELECT id,owner_id,title FROM items WHERE status='Aberto' AND updated_at<=?", (open_cutoff,)).fetchall()
         for item in old_items:
             db.execute("UPDATE items SET status='Expirado',updated_at=? WHERE id=?", (stamp, item["id"]))
+            db.execute("UPDATE claims SET status='Cancelada',updated_at=? WHERE item_id=? AND status='Pendente'", (stamp, item["id"]))
             write_history(db, item["id"], None, "Expiração automática", "Anúncio sem atividade há 60 dias.")
             add_notification(db, item["owner_id"], "expiracao", "Anúncio expirado", f"O anúncio '{item['title']}' expirou após 60 dias sem atividade.", item["id"])
 
@@ -588,6 +940,7 @@ def maintenance(force=False):
             retention = item["retention_days"]
             if age >= retention:
                 db.execute("UPDATE items SET status='Expirado',updated_at=? WHERE id=?", (stamp, item["id"]))
+                db.execute("UPDATE claims SET status='Cancelada',updated_at=? WHERE item_id=? AND status='Pendente'", (stamp, item["id"]))
                 write_history(db, item["id"], None, "Expiração de item guardado", f"Prazo de guarda configurado: {retention} dias.")
                 add_notification(db, item["owner_id"], "expiracao", "Prazo de guarda encerrado", f"O prazo de guarda de '{item['title']}' foi encerrado; procure a instituição para obter orientação.", item["id"])
                 notify_moderators(db, "expiracao", "Item com prazo de guarda encerrado", item["title"], item["id"])
@@ -598,19 +951,64 @@ def maintenance(force=False):
         LAST_MAINTENANCE = time.time()
 
 
+class LocalHTTPServer(ThreadingHTTPServer):
+    """Servidor com teto de conexões simultâneas: o excedente é recusado em vez de criar threads sem limite."""
+    daemon_threads = True
+
+    def __init__(self, address, handler, max_threads=MAX_THREADS):
+        self._slots = threading.BoundedSemaphore(max_threads)
+        super().__init__(address, handler)
+
+    def process_request(self, request, client_address):
+        if not self._slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; "
+       "base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "EncontreiLocal/2.0"
+    server_version = "Encontrei"
+    sys_version = ""
+    timeout = REQUEST_TIMEOUT
 
     def log_message(self, fmt, *args):
-        print("[%s] %s" % (self.log_date_time_string(), fmt % args))
+        # Remove caracteres de controle para evitar injeção de sequências no terminal.
+        line = re.sub(r"[\x00-\x1f\x7f-\x9f]", "?", fmt % args)
+        print("[%s] %s" % (self.log_date_time_string(), line))
 
-    def send_json(self, data, status=200):
+    def security_headers(self, html=False):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        self.send_header("Content-Security-Policy", CSP if html else "default-src 'none'; frame-ancestors 'none'")
+
+    def send_json(self, data, status=200, cookies=()):
         raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
+        for cookie in cookies:
+            self.send_header("Set-Cookie", cookie)
+        self.security_headers()
         self.end_headers()
         self.wfile.write(raw)
 
@@ -619,17 +1017,46 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
-        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cache-Control", "no-store")
+        self.security_headers(html=True)
         self.end_headers()
         self.wfile.write(raw)
 
-    def body_json(self):
+    def check_host(self):
+        """Recusa Host desconhecido (proteção contra DNS rebinding)."""
+        host = (self.headers.get("Host") or "").strip().lower()
+        port = self.server.server_address[1]
+        allowed = {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"} | EXTRA_ALLOWED_HOSTS
+        if port == 80:
+            allowed |= {"127.0.0.1", "localhost", "[::1]"}
+        if host not in allowed:
+            raise APIError(421, "Host não permitido.")
+
+    def session_token(self):
+        auth = self.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            return auth.removeprefix("Bearer ").strip(), False
+        for part in self.headers.get("Cookie", "").split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == "enc_session" and value:
+                return value, True
+        return "", False
+
+    def check_csrf(self, from_cookie):
+        """Requisições que alteram estado e usam o cookie precisam do cabeçalho próprio do frontend."""
+        if from_cookie and self.command in ("POST", "PATCH", "DELETE") and self.headers.get("X-Encontrei") != "1":
+            raise APIError(403, "Requisição recusada (proteção CSRF).")
+
+    def client_ip(self):
+        return self.client_address[0]
+
+    def body_json(self, limit=MAX_SMALL_BODY):
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             raise APIError(400, "Cabeçalho Content-Length inválido.")
         if length < 0: raise APIError(400, "Tamanho de corpo inválido.")
-        if length > MAX_BODY: raise APIError(413, "Dados enviados excedem o limite permitido.")
+        if length > limit: raise APIError(413, "Dados enviados excedem o limite permitido.")
         try:
             value = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
         except (ValueError, UnicodeDecodeError):
@@ -638,23 +1065,29 @@ class Handler(BaseHTTPRequestHandler):
         return value
 
     def current_user(self, required=True):
-        auth = self.headers.get("Authorization", "")
-        token = auth.removeprefix("Bearer ").strip()
-        token_data = TOKENS.get(token)
+        token, from_cookie = self.session_token()
+        token_data = TOKENS.get(token) if token else None
         if not token_data:
             if required: raise APIError(401, "Entre no sistema para realizar esta ação.")
             return None
-        uid, expires = token_data
-        if expires < time.time():
+        uid, expires = token_data[0], token_data[1]
+        last_seen = token_data[2] if len(token_data) > 2 else time.time()
+        current = time.time()
+        if expires < current or current - last_seen > SESSION_IDLE:
             TOKENS.pop(token, None)
             if required: raise APIError(401, "Sua sessão expirou. Entre novamente.")
             return None
+        if required:
+            self.check_csrf(from_cookie)
         with connect() as db:
             row = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
         if not row or row["status"] != "Ativo" or not row["email_verified"]:
             TOKENS.pop(token, None)
             if required: raise APIError(403, "Conta inativa ou suspensa. Procure a moderação.")
             return None
+        with DB_LOCK:
+            if token in TOKENS:
+                TOKENS[token] = (uid, expires, current)
         return row
 
     def require_moderator(self, user):
@@ -673,22 +1106,61 @@ class Handler(BaseHTTPRequestHandler):
     def api_start(self):
         maintenance()
 
+    def deliver_verification(self, email, token, message, body_template):
+        """Envia o link por e-mail. Fora do modo demonstração ele nunca volta na resposta da API:
+        sem SMTP, aparece apenas no terminal do servidor (visível a quem opera a máquina)."""
+        link = f"http://{HOST}:{PORT}/api/verify-email?token={quote(token)}"
+        delivered = send_email(email, "Verifique sua conta do Encontrei", body_template.replace("{link}", link))
+        result = {"message": message}
+        if not delivered:
+            if DEMO_MODE:
+                result["verification_url"] = link
+                result["message"] = "Modo demonstração: o envio de e-mail não está configurado, então use o link abaixo para ativar a conta."
+            else:
+                print(f"[Verificação] SMTP não configurado ou indisponível. Link de ativação para {email}: {link}")
+        return result
+
+    def staff_conflict(self, user, *user_ids):
+        """Moderador não decide casos em que é parte (denunciante, denunciado ou dono do item)."""
+        if user["id"] in user_ids:
+            raise APIError(403, "Você é parte deste caso; outra pessoa da moderação precisa analisá-lo.")
+
+    def suspend_after_reports(self, db, target_id, item_id=None):
+        """Suspensão automática vale só para estudantes; contas da equipe vão para a administração."""
+        target = db.execute("SELECT role,status FROM users WHERE id=?", (target_id,)).fetchone()
+        if not target or target["status"] != "Ativo":
+            return
+        if target["role"] != "Estudante":
+            for row in db.execute("SELECT id FROM users WHERE role='Administrador' AND status='Ativo' AND id<>?", (target_id,)).fetchall():
+                add_notification(db, row[0], "moderacao", "Denúncias procedentes contra a equipe",
+                                 f"A conta #{target_id} ({target['role']}) acumulou três denúncias procedentes. A suspensão automática não se aplica à equipe; avalie manualmente.", item_id)
+            return
+        db.execute("UPDATE users SET status='Suspenso' WHERE id=?", (target_id,))
+        revoke_user_sessions(target_id)
+        add_notification(db, target_id, "moderacao", "Conta suspensa", "Sua conta foi suspensa após três denúncias procedentes.", item_id)
+
     def do_OPTIONS(self):
+        try:
+            self.check_host()
+        except APIError as e:
+            self.send_json({"error": e.message}, e.status); return
         self.send_response(204)
         self.send_header("Allow", "GET, POST, PATCH, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.security_headers()
         self.end_headers()
 
     def do_GET(self):
         try:
+            self.check_host()
             parsed = urlparse(self.path)
             path = parsed.path
             qs = parse_qs(parsed.query)
             if path == "/api/verify-email":
                 token = qs.get("token", [""])[0]
+                if not token or not rate_hit(("verify", self.client_ip()), 30, 15 * 60):
+                    self.send_html("<!doctype html><html lang='pt-br'><meta charset='utf-8'><title>Encontrei</title><h1>Link inválido</h1><p>O link de verificação é inválido ou já foi utilizado.</p><a href='/'>Voltar ao Encontrei</a></html>", 400); return
                 with connect() as db:
-                    user = db.execute("SELECT id,verification_expires_at FROM users WHERE verification_token=? AND status='Pendente'", (token,)).fetchone()
+                    user = db.execute("SELECT id,verification_expires_at FROM users WHERE verification_token=? AND status='Pendente'", (token_digest(token),)).fetchone()
                     if not user:
                         self.send_html("<!doctype html><html lang='pt-br'><meta charset='utf-8'><title>Encontrei</title><h1>Link inválido</h1><p>O link de verificação é inválido ou já foi utilizado.</p><a href='/'>Voltar ao Encontrei</a></html>", 400); return
                     if not user["verification_expires_at"] or datetime.fromisoformat(user["verification_expires_at"]) < datetime.now():
@@ -699,9 +1171,10 @@ class Handler(BaseHTTPRequestHandler):
             if path in ("/", "/index.html"):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("X-Content-Type-Options", "nosniff")
                 body = WEB_PATH.read_bytes()
                 self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.security_headers(html=True)
                 self.end_headers()
                 self.wfile.write(body)
                 return
@@ -715,21 +1188,20 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", mimetypes.guess_type(str(file_path))[0] or "application/octet-stream")
                 self.send_header("Content-Length", str(len(body)))
-                self.send_header("X-Content-Type-Options", "nosniff")
                 self.send_header("Cache-Control", "no-store")
+                self.security_headers()
                 self.end_headers(); self.wfile.write(body); return
 
             self.api_start()
             if path == "/api/health":
                 with connect() as db:
                     db.execute("SELECT 1").fetchone()
-                    size = db.execute("SELECT COUNT(*) FROM items").fetchone()[0]
-                self.send_json({"ok": True, "app": "Encontrei", "database": "SQLite", "items": size}); return
+                self.send_json({"ok": True}); return
             if path == "/api/config":
                 with connect() as db:
                     categories = db.execute("SELECT name,requires_guard FROM categories WHERE active=1 ORDER BY name").fetchall()
                     locations = db.execute("SELECT name,block_name FROM locations WHERE active=1 ORDER BY name").fetchall()
-                self.send_json({"categories": [dict(r) for r in categories], "locations": [dict(r) for r in locations]}); return
+                self.send_json({"categories": [dict(r) for r in categories], "locations": [dict(r) for r in locations], "demo": DEMO_MODE}); return
             if path == "/api/me":
                 self.send_json({"user": user_public(self.current_user())}); return
             if path == "/api/items":
@@ -757,10 +1229,10 @@ class Handler(BaseHTTPRequestHandler):
                     if typ not in ("Achado", "Perdido"): raise APIError(400, "Filtro de tipo inválido.")
                     sql += " AND i.type=?"; vals.append(typ)
                 if cat: sql += " AND i.category=? COLLATE NOCASE"; vals.append(cat)
-                if location: sql += " AND i.location LIKE ? COLLATE NOCASE"; vals.append("%"+location+"%")
+                if location: sql += " AND i.location LIKE ? ESCAPE '\\' COLLATE NOCASE"; vals.append(like_pattern(location))
                 if query:
-                    sql += " AND (i.title LIKE ? COLLATE NOCASE OR i.description LIKE ? COLLATE NOCASE OR i.category LIKE ? COLLATE NOCASE OR i.location LIKE ? COLLATE NOCASE)"
-                    vals += ["%"+query+"%"]*4
+                    sql += " AND (i.title LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.description LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.category LIKE ? ESCAPE '\\' COLLATE NOCASE OR i.location LIKE ? ESCAPE '\\' COLLATE NOCASE)"
+                    vals += [like_pattern(query)]*4
                 if date_from:
                     sql += " AND i.event_date>=?"; vals.append(valid_date(date_from, "data inicial"))
                 if date_to:
@@ -898,61 +1370,86 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            self.check_host()
             path = urlparse(self.path).path
-            data = self.body_json()
+            if path in ("/api/items", "/api/guard-points/items"):
+                # Rotas com fotos: autentica antes de aceitar um corpo grande.
+                self.current_user()
+                data = self.body_json(MAX_BODY)
+            else:
+                data = self.body_json()
             self.api_start()
             if path == "/api/register":
+                if not rate_hit(("register", self.client_ip()), 10, 60 * 60):
+                    raise APIError(429, "Muitos cadastros a partir deste endereço. Tente novamente mais tarde.")
                 name = text_value(data.get("name"), "nome", 2, 80)
                 email = text_value(data.get("email"), "e-mail", 6, 190).lower()
                 password = str(data.get("password", ""))
                 confirmation = str(data.get("password_confirmation", ""))
                 if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email): raise APIError(400, "Informe um e-mail válido.")
-                if len(password) < 8 or len(password) > 128: raise APIError(400, "A senha deve ter entre 8 e 128 caracteres.")
+                problem = password_problem(password, email)
+                if problem: raise APIError(400, problem)
                 if password != confirmation: raise APIError(400, "A confirmação de senha não confere.")
                 domain = email.rsplit("@", 1)[1]
+                salt, digest = hash_password(password)  # calculado sempre, para não revelar contas pelo tempo de resposta
+                verify = secrets.token_urlsafe(32)
+                expires = (datetime.now() + timedelta(hours=24)).replace(microsecond=0).isoformat()
                 with connect() as db:
                     allowed = db.execute("SELECT id FROM institutional_domains WHERE domain=? COLLATE NOCASE AND active=1", (domain,)).fetchone()
                     if not allowed: raise APIError(400, "Use seu e-mail institucional. Este domínio não está autorizado.")
-                    if db.execute("SELECT 1 FROM users WHERE email=? COLLATE NOCASE", (email,)).fetchone(): raise APIError(409, "Já existe uma conta cadastrada com esse e-mail.")
-                    salt, digest = hash_password(password)
-                    verify = secrets.token_urlsafe(32)
-                    expires = (datetime.now() + timedelta(hours=24)).replace(microsecond=0).isoformat()
-                    db.execute("INSERT INTO users(name,email,role,salt,password_hash,created_at,status,email_verified,verification_token,verification_expires_at) VALUES(?,?,'Estudante',?, ?,?,'Pendente',0,?,?)",
-                               (name, email, salt, digest, now(), verify, expires))
-                    uid = db.execute("SELECT id FROM users WHERE email=?", (email,)).fetchone()[0]
-                link = f"http://{HOST}:{PORT}/api/verify-email?token={quote(verify)}"
-                delivered = send_email(email, "Verifique sua conta do Encontrei", f"Olá, {name}!\n\nPara ativar sua conta, abra o link abaixo em até 24 horas:\n{link}\n\nSe você não solicitou esse cadastro, ignore esta mensagem.")
-                message = "Cadastro criado; enviamos o link de verificação para o e-mail informado." if delivered else "Cadastro criado. No modo local, use o link abaixo para verificar a conta; envio SMTP não está configurado ou falhou."
-                self.send_json({"message": message, "verification_url": link, "verification_email_sent": delivered, "expires_at": expires, "user_id": uid}, 201); return
+                    exists = db.execute("SELECT 1 FROM users WHERE email=? COLLATE NOCASE", (email,)).fetchone()
+                    if not exists:
+                        db.execute("INSERT INTO users(name,email,role,salt,password_hash,password_iterations,created_at,status,email_verified,verification_token,verification_expires_at) VALUES(?,?,'Estudante',?,?,?,?,'Pendente',0,?,?)",
+                                   (name, email, salt, digest, PBKDF2_ITERATIONS, now(), token_digest(verify), expires))
+                generic = "Se o e-mail puder ser cadastrado, enviaremos um link de verificação válido por 24 horas para ele."
+                if exists:
+                    # Mesma resposta de um cadastro novo: não revela se o e-mail já tem conta.
+                    send_email(email, "Tentativa de cadastro no Encontrei", "Alguém tentou criar uma conta do Encontrei com este e-mail, que já está cadastrado. Se não foi você, ignore esta mensagem.")
+                    self.send_json({"message": generic}, 201); return
+                self.send_json(self.deliver_verification(email, verify, generic, f"Olá, {name}!\n\nPara ativar sua conta, abra o link abaixo em até 24 horas:\n{{link}}\n\nSe você não solicitou esse cadastro, ignore esta mensagem."), 201); return
             if path == "/api/resend-verification":
                 email = text_value(data.get("email"), "e-mail", 6, 190).lower()
+                if not rate_hit(("resend", self.client_ip()), 5, 15 * 60) or not rate_hit(("resend", email), 3, 15 * 60):
+                    raise APIError(429, "Muitas solicitações de reenvio. Aguarde alguns minutos.")
+                generic = "Se houver uma conta pendente com esse e-mail, enviaremos um novo link de verificação."
+                token = secrets.token_urlsafe(32); expires = (datetime.now()+timedelta(hours=24)).replace(microsecond=0).isoformat()
                 with connect() as db:
                     user = db.execute("SELECT id,status FROM users WHERE email=? COLLATE NOCASE", (email,)).fetchone()
-                    if not user: raise APIError(404, "Conta não encontrada.")
-                    if user["status"] == "Ativo": raise APIError(400, "Esta conta já está verificada.")
-                    token = secrets.token_urlsafe(32); expires = (datetime.now()+timedelta(hours=24)).replace(microsecond=0).isoformat()
-                    db.execute("UPDATE users SET verification_token=?,verification_expires_at=? WHERE id=?", (token, expires, user["id"]))
-                link = f"http://{HOST}:{PORT}/api/verify-email?token={quote(token)}"
-                delivered = send_email(email, "Novo link de verificação do Encontrei", f"Para ativar sua conta, abra este link em até 24 horas:\n{link}")
-                message = "Novo link de verificação enviado." if delivered else "Novo link de verificação criado; abra-o manualmente no modo local."
-                self.send_json({"message": message, "verification_url": link, "verification_email_sent": delivered, "expires_at": expires}); return
+                    pending = bool(user and user["status"] == "Pendente")
+                    if pending:
+                        db.execute("UPDATE users SET verification_token=?,verification_expires_at=? WHERE id=?", (token_digest(token), expires, user["id"]))
+                if not pending:
+                    self.send_json({"message": generic}); return
+                self.send_json(self.deliver_verification(email, token, generic, "Para ativar sua conta, abra este link em até 24 horas:\n{link}")); return
             if path == "/api/login":
-                email = str(data.get("email", "")).strip().lower(); password = str(data.get("password", ""))
-                client = self.client_address[0] + ":" + email
-                attempts = [t for t in LOGIN_ATTEMPTS.get(client, []) if time.time()-t < 60]
-                if len(attempts) >= 8: raise APIError(429, "Muitas tentativas de login. Aguarde um minuto e tente novamente.")
-                attempts.append(time.time()); LOGIN_ATTEMPTS[client] = attempts
+                email = str(data.get("email", "")).strip().lower()[:190]; password = str(data.get("password", ""))[:256]
+                ip = self.client_ip()
+                if not rate_hit(("login-ip", ip), 30, 60) or not rate_hit(("login", ip, email), 8, 60):
+                    raise APIError(429, "Muitas tentativas de login. Aguarde um minuto e tente novamente.")
+                if rate_count(("login-fail", email), 15 * 60) >= 10:
+                    raise APIError(429, "Muitas tentativas incorretas para esta conta. Aguarde 15 minutos e tente novamente.")
                 with connect() as db: user = db.execute("SELECT * FROM users WHERE email=? COLLATE NOCASE", (email,)).fetchone()
-                if not user: raise APIError(401, "E-mail ou senha incorretos.")
-                _, digest = hash_password(password, user["salt"])
-                if not hmac.compare_digest(digest, user["password_hash"]): raise APIError(401, "E-mail ou senha incorretos.")
+                if not user:
+                    hash_password(password, "0" * 32)  # mesmo custo de uma conta existente (evita enumeração por tempo)
+                    rate_hit(("login-fail", email), 10**6, 15 * 60)
+                    raise APIError(401, "E-mail ou senha incorretos.")
+                _, digest = hash_password(password, user["salt"], user["password_iterations"])
+                if not hmac.compare_digest(digest, user["password_hash"]):
+                    rate_hit(("login-fail", email), 10**6, 15 * 60)
+                    raise APIError(401, "E-mail ou senha incorretos.")
                 if not user["email_verified"] or user["status"] == "Pendente": raise APIError(403, "Verifique seu e-mail antes de entrar.")
                 if user["status"] != "Ativo": raise APIError(403, "Sua conta está suspensa ou inativa. Procure a moderação.")
-                token = secrets.token_urlsafe(32); TOKENS[token] = (user["id"], time.time()+12*60*60)
-                self.send_json({"token": token, "user": user_public(user)}); return
+                if user["password_iterations"] < PBKDF2_ITERATIONS:
+                    # Migra o hash para o custo atual no primeiro login bem-sucedido.
+                    salt, new_digest = hash_password(password)
+                    with connect() as db:
+                        db.execute("UPDATE users SET salt=?,password_hash=?,password_iterations=? WHERE id=?", (salt, new_digest, PBKDF2_ITERATIONS, user["id"]))
+                token = create_session(user["id"])
+                cookie = f"enc_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={SESSION_TTL}"
+                self.send_json({"token": token, "user": user_public(user)}, cookies=(cookie,)); return
             if path == "/api/logout":
-                token = self.headers.get("Authorization", "").removeprefix("Bearer ").strip(); TOKENS.pop(token, None)
-                self.send_json({"ok": True}); return
+                token, _ = self.session_token(); TOKENS.pop(token, None)
+                self.send_json({"ok": True}, cookies=("enc_session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",)); return
             if path == "/api/items":
                 user = self.current_user()
                 item = self.create_item(data, user, guard_mode=False)
@@ -971,21 +1468,44 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"message": "Item registrado no ponto de guarda.", "item": item}, 201); return
             match = re.fullmatch(r"/api/items/(\d+)/claims", path)
             if match:
-                item_id = int(match.group(1)); user = self.current_user(); response = norm(data.get("answer", ""))
+                item_id = int(match.group(1)); user = self.current_user(); response = norm(data.get("answer", ""))[:250]
                 if not response: raise APIError(400, "Responda à pergunta de verificação.")
-                with connect() as db:
+                wrong = None
+                with DB_LOCK, connect() as db:
                     item = self.item_row(db, item_id)
                     if item["owner_id"] == user["id"]: raise APIError(403, "Você não pode reivindicar seu próprio anúncio.")
                     if item["type"] != "Achado" or item["status"] not in ("Aberto", "No ponto de guarda"): raise APIError(400, "Este item não aceita reivindicações.")
                     approved = db.execute("SELECT 1 FROM claims WHERE item_id=? AND status='Aprovada' LIMIT 1", (item_id,)).fetchone()
                     if approved: raise APIError(409, "Este item já possui uma reivindicação aprovada.")
                     if not item["verification_question"] or not item["verification_answer"]: raise APIError(400, "Este item não tem verificação configurada.")
-                    if norm(item["verification_answer"]) != response: raise APIError(400, "Resposta não confere. Confira os detalhes e tente novamente.")
-                    routed = int(item["guard_point_id"] is not None)
-                    try:
-                        cur = db.execute("INSERT INTO claims(item_id,claimant_id,answer,status,routed_to_moderation,created_at,updated_at) VALUES(?,?,?,'Pendente',?,?,?)",
-                                         (item_id,user["id"],str(data.get("answer",""))[:250],routed,now(),now()))
-                    except sqlite3.IntegrityError: raise APIError(409, "Você já possui uma reivindicação ativa para este item.")
+                    window = (datetime.now() - timedelta(hours=24)).isoformat(timespec="seconds")
+                    user_failures = db.execute("SELECT COUNT(*) FROM claim_attempts WHERE item_id=? AND user_id=? AND success=0 AND created_at>=?", (item_id, user["id"], window)).fetchone()[0]
+                    item_failures = db.execute("SELECT COUNT(*) FROM claim_attempts WHERE item_id=? AND success=0 AND created_at>=?", (item_id, window)).fetchone()[0]
+                    if user_failures >= CLAIM_MAX_FAILURES_PER_USER:
+                        raise APIError(429, "Limite de tentativas para este item atingido. Tente novamente em 24 horas.")
+                    if item_failures >= CLAIM_MAX_FAILURES_PER_ITEM:
+                        raise APIError(429, "Este item recebeu muitas respostas incorretas e está temporariamente bloqueado para reivindicações. A moderação foi avisada.")
+                    if not answer_matches(item["verification_answer"], response):
+                        # Registra o erro e confirma a transação antes de responder.
+                        db.execute("INSERT INTO claim_attempts(item_id,user_id,success,created_at) VALUES(?,?,0,?)", (item_id, user["id"], now()))
+                        user_failures += 1; item_failures += 1
+                        if user_failures == CLAIM_MAX_FAILURES_PER_USER:
+                            add_notification(db, item["owner_id"], "reivindicacao", "Tentativas incorretas",
+                                             f"Um usuário errou {CLAIM_MAX_FAILURES_PER_USER} vezes a pergunta de verificação de '{item['title']}' e foi bloqueado por 24 horas.", item_id)
+                        if item_failures == CLAIM_MAX_FAILURES_PER_ITEM:
+                            notify_moderators(db, "reivindicacao", "Possível tentativa de adivinhação",
+                                              f"O item '{item['title']}' recebeu {CLAIM_MAX_FAILURES_PER_ITEM} respostas incorretas em 24 horas.", item_id)
+                        wrong = CLAIM_MAX_FAILURES_PER_USER - user_failures
+                    else:
+                        db.execute("INSERT INTO claim_attempts(item_id,user_id,success,created_at) VALUES(?,?,1,?)", (item_id, user["id"], now()))
+                        routed = int(item["guard_point_id"] is not None)
+                        try:
+                            cur = db.execute("INSERT INTO claims(item_id,claimant_id,answer,status,routed_to_moderation,created_at,updated_at) VALUES(?,?,?,'Pendente',?,?,?)",
+                                             (item_id,user["id"],answer_digest(response),routed,now(),now()))
+                        except sqlite3.IntegrityError: raise APIError(409, "Você já possui uma reivindicação ativa para este item.")
+                if wrong is not None:
+                    raise APIError(400, f"Resposta não confere. Tentativas restantes para este item: {max(wrong, 0)}.")
+                with connect() as db:
                     claim_id = cur.lastrowid
                     add_notification(db, item["owner_id"], "reivindicacao", "Nova reivindicação", f"Há uma nova solicitação para '{item['title']}'.", item_id, claim_id)
                     if routed: notify_moderators(db, "reivindicacao", "Reivindicação de item guardado", f"Analise a solicitação de '{item['title']}'.", item_id, claim_id)
@@ -996,11 +1516,14 @@ class Handler(BaseHTTPRequestHandler):
                 if decision not in ("Aprovada", "Recusada"): raise APIError(400, "Decisão inválida.")
                 if decision == "Recusada" and len(note) < 5: raise APIError(400, "Informe uma justificativa de pelo menos 5 caracteres para recusar.")
                 with connect() as db:
-                    claim = db.execute("SELECT c.*,i.owner_id,i.title,i.guard_point_id FROM claims c JOIN items i ON i.id=c.item_id WHERE c.id=?", (claim_id,)).fetchone()
+                    claim = db.execute("SELECT c.*,i.owner_id,i.title,i.guard_point_id,i.status AS item_status FROM claims c JOIN items i ON i.id=c.item_id WHERE c.id=?", (claim_id,)).fetchone()
                     if not claim: raise APIError(404, "Reivindicação não encontrada.")
                     self.require_moderator(user) if claim["guard_point_id"] is not None else None
                     if user["id"] != claim["owner_id"] and user["role"] not in ("Moderador", "Administrador"): raise APIError(403, "Somente o publicador ou a moderação pode decidir.")
+                    if user["id"] == claim["claimant_id"]: raise APIError(403, "Você não pode decidir a sua própria reivindicação.")
                     if claim["status"] != "Pendente": raise APIError(409, "Esta reivindicação já foi respondida.")
+                    if decision == "Aprovada" and claim["item_status"] not in ("Aberto", "No ponto de guarda"):
+                        raise APIError(409, "O anúncio está oculto, expirado ou encerrado; a reivindicação não pode ser aprovada agora.")
                     if decision == "Aprovada":
                         other_approved = db.execute("SELECT 1 FROM claims WHERE item_id=? AND status='Aprovada' AND id<>? LIMIT 1", (claim["item_id"], claim_id)).fetchone()
                         if other_approved: raise APIError(409, "Já existe uma reivindicação aprovada para este item.")
@@ -1036,6 +1559,9 @@ class Handler(BaseHTTPRequestHandler):
                     if user["id"] != claim["owner_id"] and user["role"] not in ("Moderador","Administrador"): raise APIError(403,"Apenas o publicador ou a moderação pode confirmar a devolução.")
                     if claim["guard_point_id"] is not None: self.require_moderator(user)
                     if claim["status"] != "Aprovada": raise APIError(409,"Apenas uma reivindicação aprovada pode ser devolvida.")
+                    if claim["returned_at"]: raise APIError(409,"A devolução desta reivindicação já foi registrada.")
+                    if claim["item_status"] not in ("Aberto", "No ponto de guarda"):
+                        raise APIError(409,"O anúncio está oculto, expirado ou encerrado; a devolução não pode ser registrada agora.")
                     db.execute("UPDATE claims SET returned_at=?,updated_at=? WHERE id=?",(now(),now(),claim_id))
                     db.execute("UPDATE items SET status='Resolvido',resolved_at=?,updated_at=? WHERE id=(SELECT item_id FROM claims WHERE id=?)",(now(),now(),claim_id))
                     write_history(db,claim["item_id"],user["id"],"Devolução confirmada",f"Reivindicação #{claim_id}; responsável: {user['name']}.")
@@ -1044,14 +1570,20 @@ class Handler(BaseHTTPRequestHandler):
             match = re.fullmatch(r"/api/items/(\d+)/reports", path)
             if match:
                 item_id = int(match.group(1)); user = self.current_user(); reason = text_value(data.get("reason"), "motivo da denúncia", 5, 500)
-                with connect() as db:
+                if not rate_hit(("report", user["id"]), 10, 24 * 60 * 60):
+                    raise APIError(429, "Limite diário de denúncias atingido. Tente novamente amanhã.")
+                with DB_LOCK, connect() as db:
                     item = self.item_row(db,item_id)
                     if item["owner_id"] == user["id"]: raise APIError(400, "Você não pode denunciar seu próprio anúncio.")
+                    if item["status"] == "Oculto" and user["role"] not in ("Moderador", "Administrador"): raise APIError(404, "Anúncio não encontrado.")
                     try: db.execute("INSERT INTO reports(item_id,reporter_id,reason,created_at) VALUES(?,?,?,?)", (item_id,user["id"],reason,now()))
                     except sqlite3.IntegrityError: raise APIError(409,"Você já denunciou este anúncio.")
-                    count = db.execute("SELECT COUNT(DISTINCT reporter_id) FROM reports WHERE item_id=? AND status='Pendente'",(item_id,)).fetchone()[0]
-                    if count >= 3:
-                        db.execute("UPDATE items SET status='Oculto',updated_at=? WHERE id=?",(now(),item_id))
+                    # Só contas com mais de 24 h contam para a ocultação automática (dificulta contas fantoche).
+                    age_cutoff = (datetime.now() - timedelta(hours=REPORT_MIN_ACCOUNT_AGE_HOURS)).isoformat(timespec="seconds")
+                    count = db.execute("SELECT COUNT(DISTINCT r.reporter_id) FROM reports r JOIN users u ON u.id=r.reporter_id WHERE r.item_id=? AND r.status='Pendente' AND u.created_at<=?",(item_id,age_cutoff)).fetchone()[0]
+                    if count >= 3 and item["status"] in ("Aberto", "No ponto de guarda"):
+                        # Guarda o status anterior para restaurá-lo se a moderação mantiver o anúncio.
+                        db.execute("UPDATE items SET status='Oculto',status_before_hide=?,updated_at=? WHERE id=?",(item["status"],now(),item_id))
                         write_history(db,item_id,None,"Ocultação automática","Três denúncias de usuários distintos aguardam revisão.")
                         add_notification(db,item["owner_id"],"moderacao","Anúncio ocultado",f"O anúncio '{item['title']}' foi ocultado automaticamente para revisão.",item_id)
                         notify_moderators(db,"denuncia","Anúncio ocultado automaticamente",item["title"],item_id)
@@ -1073,26 +1605,28 @@ class Handler(BaseHTTPRequestHandler):
                 user = self.current_user(); self.require_moderator(user); report_id = int(match.group(1)); decision = data.get("decision"); note = text_value(data.get("note"), "justificativa", 5, 1000)
                 if decision not in ("Manter anúncio", "Ocultar anúncio"): raise APIError(400,"Selecione uma ação válida.")
                 with connect() as db:
-                    report = db.execute("SELECT r.*,i.owner_id,i.title,i.status AS item_status FROM reports r JOIN items i ON i.id=r.item_id WHERE r.id=?",(report_id,)).fetchone()
+                    report = db.execute("SELECT r.*,i.owner_id,i.title,i.status AS item_status,i.status_before_hide FROM reports r JOIN items i ON i.id=r.item_id WHERE r.id=?",(report_id,)).fetchone()
                     if not report: raise APIError(404,"Denúncia não encontrada.")
+                    self.staff_conflict(user, report["reporter_id"], report["owner_id"])
                     if report["status"] != "Pendente": raise APIError(409,"Esta denúncia já foi analisada.")
-                    status = "Oculto" if decision == "Ocultar anúncio" else "Improcedente"
                     db.execute("UPDATE reports SET status=?,decision_by=?,decision_note=?,decided_at=? WHERE id=?",("Procedente" if decision=="Ocultar anúncio" else "Improcedente",user["id"],note,now(),report_id))
                     if decision == "Ocultar anúncio":
-                        db.execute("UPDATE items SET status='Oculto',updated_at=? WHERE id=?",(now(),report["item_id"]))
+                        if report["item_status"] != "Oculto":
+                            db.execute("UPDATE items SET status='Oculto',status_before_hide=?,updated_at=? WHERE id=?",(report["item_status"],now(),report["item_id"]))
                     elif report["item_status"] == "Oculto":
                         pending = db.execute("SELECT COUNT(*) FROM reports WHERE item_id=? AND status='Pendente'",(report["item_id"],)).fetchone()[0]
-                        if pending == 0: db.execute("UPDATE items SET status='Aberto',updated_at=? WHERE id=?",(now(),report["item_id"]))
+                        upheld = db.execute("SELECT COUNT(*) FROM reports WHERE item_id=? AND status='Procedente'",(report["item_id"],)).fetchone()[0]
+                        if pending == 0 and upheld == 0:
+                            # Restaura o status que o anúncio tinha antes de ser ocultado (não reabre itens encerrados).
+                            previous = report["status_before_hide"] or "Aberto"
+                            db.execute("UPDATE items SET status=?,status_before_hide=NULL,updated_at=? WHERE id=?",(previous,now(),report["item_id"]))
                     db.execute("INSERT INTO moderation_actions(moderator_id,item_id,report_id,action,justification,created_at) VALUES(?,?,?,?,?,?)",(user["id"],report["item_id"],report_id,decision,note,now()))
                     write_history(db,report["item_id"],user["id"],"Denúncia analisada",f"{decision}: {note}")
                     add_notification(db,report["owner_id"],"moderacao","Denúncia analisada",f"Uma denúncia sobre '{report['title']}' foi analisada.",report["item_id"])
                     if decision == "Ocultar anúncio":
                         upheld = db.execute("SELECT COUNT(*) FROM reports r JOIN items i ON i.id=r.item_id WHERE i.owner_id=? AND r.status='Procedente'",(report["owner_id"],)).fetchone()[0]
                         if upheld >= 3:
-                            db.execute("UPDATE users SET status='Suspenso' WHERE id=?",(report["owner_id"],))
-                            for key,val in list(TOKENS.items()):
-                                if val[0] == report["owner_id"]: TOKENS.pop(key,None)
-                            add_notification(db,report["owner_id"],"moderacao","Conta suspensa", "Sua conta foi suspensa após três denúncias procedentes.", report["item_id"])
+                            self.suspend_after_reports(db, report["owner_id"], report["item_id"])
                 self.send_json({"message":"Análise de moderação registrada."}); return
             match = re.fullmatch(r"/api/profile-reports/(\d+)/decision", path)
             if match:
@@ -1101,6 +1635,7 @@ class Handler(BaseHTTPRequestHandler):
                 with connect() as db:
                     report=db.execute("SELECT * FROM profile_reports WHERE id=?",(report_id,)).fetchone()
                     if not report: raise APIError(404,"Denúncia de perfil não encontrada.")
+                    self.staff_conflict(user, report["reporter_id"], report["target_user_id"])
                     if report["status"]!="Pendente": raise APIError(409,"Esta denúncia já foi analisada.")
                     db.execute("UPDATE profile_reports SET status=?,decision_by=?,decision_note=?,decided_at=? WHERE id=?",(decision,user["id"],note,now(),report_id))
                     db.execute("INSERT INTO moderation_actions(moderator_id,action,justification,created_at) VALUES(?,?,?,?)",(user["id"],f"Denúncia de perfil #{report_id}: {decision}",note,now()))
@@ -1109,10 +1644,7 @@ class Handler(BaseHTTPRequestHandler):
                         count=db.execute("SELECT COUNT(*) FROM profile_reports WHERE target_user_id=? AND status='Procedente'",(target,)).fetchone()[0]
                         item_count=db.execute("SELECT COUNT(*) FROM reports r JOIN items i ON i.id=r.item_id WHERE i.owner_id=? AND r.status='Procedente'",(target,)).fetchone()[0]
                         if count+item_count >= 3:
-                            db.execute("UPDATE users SET status='Suspenso' WHERE id=?",(target,))
-                            for key,val in list(TOKENS.items()):
-                                if val[0] == target: TOKENS.pop(key,None)
-                            add_notification(db,target,"moderacao","Conta suspensa","Sua conta foi suspensa após três denúncias procedentes.")
+                            self.suspend_after_reports(db, target)
                 self.send_json({"message":"Denúncia de perfil analisada."}); return
             if path == "/api/notifications/read-all":
                 user=self.current_user()
@@ -1185,23 +1717,20 @@ class Handler(BaseHTTPRequestHandler):
         if typ=="Achado" and not photos: raise APIError(400,"Itens achados precisam de pelo menos uma foto.")
         if typ=="Achado" and (len(question)<8 or len(question)>250 or not answer or len(answer)>250): raise APIError(400,"Itens achados precisam de pergunta (8 a 250 caracteres) e resposta de verificação (até 250 caracteres).")
         if typ=="Perdido": question=answer=""
-        prepared=[]
-        for image in photos:
-            if not isinstance(image,dict): raise APIError(400,"Formato de foto inválido.")
-            mime=image.get("mime",""); raw=image.get("data","")
-            if mime not in ("image/jpeg","image/png","image/webp"): raise APIError(400,"Use fotos JPG, PNG ou WEBP.")
-            if not isinstance(raw,str) or "," not in raw: raise APIError(400,"Uma foto enviada está inválida.")
-            try: binary=base64.b64decode(raw.split(",",1)[1],validate=True)
-            except Exception: raise APIError(400,"Uma foto enviada está inválida.")
-            if not binary or len(binary)>MAX_PHOTO: raise APIError(400,"Cada foto deve ter conteúdo e no máximo 5 MB.")
-            signatures={"image/jpeg":binary.startswith(b"\xff\xd8\xff"),"image/png":binary.startswith(b"\x89PNG\r\n\x1a\n"),"image/webp":len(binary)>=12 and binary[:4]==b"RIFF" and binary[8:12]==b"WEBP"}
-            if not signatures[mime]: raise APIError(400,"O conteúdo da foto não corresponde ao formato informado.")
-            prepared.append((mime,binary))
+        prepared=prepare_photos(photos)
+        written=[]
+        try:
+            return self._insert_item(data, user, guard_mode, title, typ, category, description, location, event_date, question, answer, prepared, written)
+        except Exception:
+            remove_files(written)  # nenhuma foto fica órfã se a gravação do anúncio falhar
+            raise
+
+    def _insert_item(self, data, user, guard_mode, title, typ, category, description, location, event_date, question, answer, prepared, written):
         with connect() as db:
             open_count=db.execute("SELECT COUNT(*) FROM items WHERE owner_id=? AND status IN ('Aberto','No ponto de guarda')",(user["id"],)).fetchone()[0]
             day_count=db.execute("SELECT COUNT(*) FROM items WHERE owner_id=? AND substr(created_at,1,10)=?",(user["id"],date.today().isoformat())).fetchone()[0]
-            if open_count>=10: raise APIError(409,"Você já tem 10 anúncios abertos. Resolva algum antes de publicar outro.")
-            if day_count>=5: raise APIError(409,"Limite de 5 anúncios por dia atingido.")
+            if open_count>=MAX_OPEN_ITEMS: raise APIError(409,f"Você já tem {MAX_OPEN_ITEMS} anúncios abertos. Resolva algum antes de publicar outro.")
+            if day_count>=MAX_ITEMS_PER_DAY: raise APIError(409,f"Limite de {MAX_ITEMS_PER_DAY} anúncios por dia atingido.")
             cat_row=db.execute("SELECT * FROM categories WHERE name=? COLLATE NOCASE AND active=1",(category,)).fetchone()
             if cat_row and cat_row["requires_guard"] and typ=="Achado" and not guard_mode:
                 raise APIError(400,"Esta categoria deve ser cadastrada por um moderador no ponto de guarda da instituição.")
@@ -1216,16 +1745,12 @@ class Handler(BaseHTTPRequestHandler):
                 if norm(location)!=norm(point["location_name"]): raise APIError(400,"O local do anúncio precisa corresponder ao local do ponto de guarda.")
                 status="No ponto de guarda"
             category_id,location_id=catalog_ids(db,category,location)
-            photo_urls=[]
-            for mime,binary in prepared:
-                ext={"image/jpeg":".jpg","image/png":".png","image/webp":".webp"}[mime]
-                filename=secrets.token_hex(16)+ext
-                (UPLOAD_DIR/filename).write_bytes(binary)
-                photo_urls.append("/uploads/"+filename)
+            photo_urls,paths=store_photos(prepared)
+            written.extend(paths)
             stamp=now()
             cur=db.execute("""INSERT INTO items(title,type,category,category_id,description,location,location_id,event_date,status,owner_id,guard_point_id,
                        verification_question,verification_answer,photos_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                       (title,typ,category,category_id,description,location,location_id,event_date,status,user["id"],guard_id,question or None,answer or None,json.dumps(photo_urls),stamp,stamp))
+                       (title,typ,category,category_id,description,location,location_id,event_date,status,user["id"],guard_id,question or None,answer_digest(answer) if answer else None,json.dumps(photo_urls),stamp,stamp))
             item_id=cur.lastrowid
             write_history(db,item_id,user["id"],"Anúncio publicado",f"Tipo: {typ}; status: {status}.")
             row=db.execute("SELECT i.*,u.name AS owner_name FROM items i JOIN users u ON u.id=i.owner_id WHERE i.id=?",(item_id,)).fetchone()
@@ -1233,45 +1758,45 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PATCH(self):
         try:
-            path=urlparse(self.path).path; data=self.body_json(); self.api_start(); user=self.current_user()
+            self.check_host()
+            path=urlparse(self.path).path; user=self.current_user()
             match=re.fullmatch(r"/api/items/(\d+)",path)
+            data=self.body_json(MAX_BODY if match else MAX_SMALL_BODY); self.api_start()
             if match:
                 item_id=int(match.group(1))
                 old_photo_urls=[]
-                with connect() as db:
-                    item=self.item_row(db,item_id)
-                    if item["owner_id"]!=user["id"]: raise APIError(403,"Somente o publicador pode editar este anúncio.")
-                    if item["status"]!="Aberto": raise APIError(409,"Somente anúncios abertos podem ser editados.")
-                    title=text_value(data.get("title",item["title"]),"título",3,100)
-                    description=text_value(data.get("description",item["description"]),"descrição",5,1200)
-                    category=text_value(data.get("category",item["category"]),"categoria",2,80)
-                    location=text_value(data.get("location",item["location"]),"local",2,160)
-                    event_date=valid_date(data.get("event_date",item["event_date"]),"data do item")
-                    target_category=db.execute("SELECT requires_guard FROM categories WHERE name=? COLLATE NOCASE AND active=1",(category,)).fetchone()
-                    if not target_category: raise APIError(400,"Selecione uma categoria ativa cadastrada no sistema.")
-                    if item["type"]=="Achado" and target_category["requires_guard"] and item["guard_point_id"] is None:
-                        raise APIError(400,"Esta categoria deve ser cadastrada por um moderador no ponto de guarda da instituição.")
-                    photos_in=data.get("photos",None)
-                    photo_urls=json.loads(item["photos_json"] or "[]")
-                    if photos_in is not None:
-                        if not isinstance(photos_in,list) or len(photos_in)>3: raise APIError(400,"Você pode manter no máximo 3 fotos.")
-                        if item["type"]=="Achado" and not photos_in: raise APIError(400,"Itens achados precisam manter pelo menos uma foto.")
-                        old_photo_urls = photo_urls
-                        photo_urls = []
-                        prepared=[]
-                        for image in photos_in:
-                            mime=image.get("mime",""); raw=image.get("data","")
-                            if mime not in ("image/jpeg","image/png","image/webp") or not isinstance(raw,str) or "," not in raw: raise APIError(400,"Uma foto enviada está inválida.")
-                            try: binary=base64.b64decode(raw.split(",",1)[1],validate=True)
-                            except Exception: raise APIError(400,"Uma foto enviada está inválida.")
-                            if len(binary)>MAX_PHOTO: raise APIError(400,"Cada foto deve ter no máximo 5 MB.")
-                            if not ((mime=="image/jpeg" and binary.startswith(b"\xff\xd8\xff")) or (mime=="image/png" and binary.startswith(b"\x89PNG\r\n\x1a\n")) or (mime=="image/webp" and len(binary)>=12 and binary[:4]==b"RIFF" and binary[8:12]==b"WEBP")):
-                                raise APIError(400,"O conteúdo da foto não corresponde ao formato informado.")
-                            ext={"image/jpeg":".jpg","image/png":".png","image/webp":".webp"}[mime]; filename=secrets.token_hex(16)+ext; (UPLOAD_DIR/filename).write_bytes(binary); photo_urls.append("/uploads/"+filename)
-                        if len(photo_urls)>3: raise APIError(400,"Você pode manter no máximo 3 fotos no total.")
-                    category_id,location_id=catalog_ids(db,category,location)
-                    db.execute("UPDATE items SET title=?,description=?,category=?,category_id=?,location=?,location_id=?,event_date=?,photos_json=?,updated_at=? WHERE id=?",(title,description,category,category_id,location,location_id,event_date,json.dumps(photo_urls),now(),item_id))
-                    write_history(db,item_id,user["id"],"Anúncio editado","Título, descrição, categoria, local, data e/ou fotos atualizados.")
+                written=[]
+                try:
+                    with connect() as db:
+                        item=self.item_row(db,item_id)
+                        if item["owner_id"]!=user["id"]: raise APIError(403,"Somente o publicador pode editar este anúncio.")
+                        if item["status"]!="Aberto": raise APIError(409,"Somente anúncios abertos podem ser editados.")
+                        title=text_value(data.get("title",item["title"]),"título",3,100)
+                        description=text_value(data.get("description",item["description"]),"descrição",5,1200)
+                        category=text_value(data.get("category",item["category"]),"categoria",2,80)
+                        location=text_value(data.get("location",item["location"]),"local",2,160)
+                        event_date=valid_date(data.get("event_date",item["event_date"]),"data do item")
+                        target_category=db.execute("SELECT requires_guard FROM categories WHERE name=? COLLATE NOCASE AND active=1",(category,)).fetchone()
+                        if not target_category: raise APIError(400,"Selecione uma categoria ativa cadastrada no sistema.")
+                        if item["type"]=="Achado" and target_category["requires_guard"] and item["guard_point_id"] is None:
+                            raise APIError(400,"Esta categoria deve ser cadastrada por um moderador no ponto de guarda da instituição.")
+                        photos_in=data.get("photos",None)
+                        photo_urls=json.loads(item["photos_json"] or "[]")
+                        prepared=None
+                        if photos_in is not None:
+                            # Valida todas as fotos e os catálogos antes de gravar qualquer arquivo.
+                            prepared=prepare_photos(photos_in,"Você pode manter no máximo 3 fotos.")
+                            if item["type"]=="Achado" and not prepared: raise APIError(400,"Itens achados precisam manter pelo menos uma foto.")
+                        category_id,location_id=catalog_ids(db,category,location)
+                        if prepared is not None:
+                            old_photo_urls=photo_urls
+                            photo_urls,paths=store_photos(prepared)
+                            written.extend(paths)
+                        db.execute("UPDATE items SET title=?,description=?,category=?,category_id=?,location=?,location_id=?,event_date=?,photos_json=?,updated_at=? WHERE id=?",(title,description,category,category_id,location,location_id,event_date,json.dumps(photo_urls),now(),item_id))
+                        write_history(db,item_id,user["id"],"Anúncio editado","Título, descrição, categoria, local, data e/ou fotos atualizados.")
+                except Exception:
+                    remove_files(written)
+                    raise
                 for old_url in old_photo_urls:
                     try:
                         if old_url.startswith("/uploads/"):
@@ -1345,8 +1870,7 @@ class Handler(BaseHTTPRequestHandler):
                         if uid==user["id"] and status!="Ativo": raise APIError(400,"Não suspenda sua própria conta durante a sessão.")
                         db.execute("UPDATE users SET status=? WHERE id=?",(status,uid))
                         if status=="Suspenso":
-                            for key,val in list(TOKENS.items()):
-                                if val[0]==uid: TOKENS.pop(key,None)
+                            revoke_user_sessions(uid)
                         elif target["email_verified"]:
                             add_notification(db,uid,"conta","Conta reativada","Sua conta foi reativada pela administração.")
                 self.send_json({"message":"Usuário atualizado."}); return
@@ -1365,6 +1889,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         try:
+            self.check_host()
             path=urlparse(self.path).path; self.api_start(); user=self.current_user()
             match=re.fullmatch(r"/api/items/(\d+)",path)
             if not match: raise APIError(404,"Rota não encontrada.")
@@ -1393,11 +1918,14 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     init_db()
     maintenance(force=True)
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    server = LocalHTTPServer((HOST, PORT), Handler)
     print("\n==============================================")
     print("  ENCONTREI - ACHADOS E PERDIDOS")
     print(f"  Aplicação: http://{HOST}:{PORT}")
     print(f"  Banco local: {DB_PATH}")
+    if DEMO_MODE:
+        print("  MODO DEMONSTRAÇÃO: contas com senhas públicas (README).")
+        print("  Não use este modo fora do seu computador.")
     print("  Para encerrar, volte aqui e pressione Ctrl+C")
     print("==============================================\n")
     threading.Timer(1.0, lambda: webbrowser.open(f"http://{HOST}:{PORT}")).start()
